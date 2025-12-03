@@ -58,10 +58,10 @@ app.get('/health', (req, res) => {
 });
 
 // 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
-    error: 'Not Found',
-    message: `Cannot ${req.method} ${req.originalUrl}`
+app.use('/*', (req, res) => {
+  res.status(404).json({ 
+    error: 'Route not found',
+    message: 'This is a REST API endpoint. Use /api/users for user operations.'
   });
 });
 

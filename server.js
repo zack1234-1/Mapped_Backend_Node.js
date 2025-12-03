@@ -1,73 +1,100 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-require('dotenv').config(); 
+require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 5000;
 
-// Utility function to wrap async route handlers
-// This ensures that all asynchronous errors are automatically caught and passed to the Express error handler.
+// Utility function for async handlers
 const asyncHandler = fn => (req, res, next) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
+  Promise.resolve(fn(req, res, next)).catch(next);
 };
 
-// Middlewares
-app.use(cors()); 
-app.use(express.json()); 
+// Middleware - critical for Render
+app.use(cors());
+app.use(express.json());
 
-// Custom Middleware: Set Referrer-Policy
-// This sets a default policy for your site's responses, controlling how much information
-// is sent when requesting external resources like Google Fonts.
+// Remove any Referrer-Policy headers for API
 app.use((req, res, next) => {
-    // 'no-referrer-when-downgrade' is less strict than 'strict-origin-when-cross-origin' 
-    // and is generally secure, sending the full referrer URL only if security is maintained (HTTPS to HTTPS).
-    res.setHeader('Referrer-Policy', 'no-referrer-when-downgrade');
-    next();
+  // Render-specific: override any default CSP headers
+  res.removeHeader('Content-Security-Policy');
+  res.removeHeader('X-Content-Security-Policy');
+  res.removeHeader('X-WebKit-CSP');
+  
+  // Set API-appropriate headers
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  
+  next();
 });
 
-// 1. MongoDB Connection
+// MongoDB Connection
 mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log('MongoDB connected successfully'))
-    .catch(err => console.error('MongoDB connection error:', err));
+  .then(() => console.log('MongoDB connected successfully'))
+  .catch(err => console.error('MongoDB connection error:', err));
 
-// 2. Route Handling
-// Note: This requires a 'routes/userRoutes.js' file that accepts the asyncHandler utility.
+// Routes
 const userRoutes = require('./routes/userRoutes')(asyncHandler);
-app.use('/api/users', userRoutes); 
+app.use('/api/users', userRoutes);
 
-// 3. Enhanced Global Error Handler (Must be defined last)
-app.use((err, req, res, next) => {
-    console.error('Error Stack:', err.stack);
-    
-    // Mongoose validation error (e.g., missing required field)
-    if (err.name === 'ValidationError') {
-        return res.status(400).json({ 
-            msg: 'Validation Error',
-            errors: Object.values(err.errors).map(e => e.message) 
-        });
+// Root endpoint - important for Render health checks
+app.get('/', (req, res) => {
+  res.json({
+    status: 'OK',
+    message: 'User API is running',
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      register: 'POST /api/users/register',
+      login: 'POST /api/users/login',
+      getUsers: 'GET /api/users'
     }
-    
-    // Mongoose duplicate key error (code 11000, typically for unique fields like email)
-    if (err.code === 11000) {
-        // Extract the field that caused the error (e.g., 'email')
-        const field = Object.keys(err.keyValue)[0];
-        return res.status(400).json({ msg: `Duplicate value entered for field: ${field}` });
-    }
-    
-    // Mongoose bad ObjectId (CastError, e.g., searching with a malformed ID)
-    if (err.name === 'CastError') {
-        return res.status(404).json({ msg: 'Resource not found' });
-    }
-    
-    // Default server error
-    // In production, we hide the specific error message for security.
-    res.status(500).json({ 
-        msg: 'Server Error',
-        ...(process.env.NODE_ENV === 'development' && { error: err.message })
-    });
+  });
 });
 
+// Health check endpoint (required for Render)
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'healthy' });
+});
+
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({
+    error: 'Not Found',
+    message: `Cannot ${req.method} ${req.originalUrl}`
+  });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('Error:', err.message);
+  
+  // Always return JSON
+  res.setHeader('Content-Type', 'application/json');
+  
+  // Handle specific errors
+  if (err.name === 'ValidationError') {
+    return res.status(400).json({
+      error: 'Validation Error',
+      details: Object.values(err.errors).map(e => e.message)
+    });
+  }
+  
+  if (err.code === 11000) {
+    return res.status(400).json({
+      error: 'Duplicate Entry',
+      field: Object.keys(err.keyValue)[0]
+    });
+  }
+  
+  // Default error
+  res.status(err.status || 500).json({
+    error: 'Internal Server Error',
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+  });
+});
+
+// Start server
 app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
+  console.log(`Server running on port ${port} in ${process.env.NODE_ENV || 'development'} mode`);
 });

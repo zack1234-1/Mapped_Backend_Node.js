@@ -11,7 +11,7 @@ const asyncHandler = fn => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch(next);
 };
 
-// Middleware - critical for Render
+// Middleware
 app.use(cors());
 app.use(express.json());
 
@@ -38,7 +38,12 @@ mongoose.connect(process.env.MONGO_URI)
 const userRoutes = require('./routes/userRoutes')(asyncHandler);
 app.use('/api/users', userRoutes);
 
-// Root endpoint - important for Render health checks
+// Health check endpoint (required for Render)
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'healthy' });
+});
+
+// Root endpoint
 app.get('/', (req, res) => {
   res.json({
     status: 'OK',
@@ -52,13 +57,9 @@ app.get('/', (req, res) => {
   });
 });
 
-// Health check endpoint (required for Render)
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'healthy' });
-});
-
-// 404 handler
-app.use('/*', (req, res) => {
+// 404 handler - FIXED for Express 5
+// Use regex pattern instead of string
+app.use(/.*/, (req, res) => {
   res.status(404).json({ 
     error: 'Route not found',
     message: 'This is a REST API endpoint. Use /api/users for user operations.'

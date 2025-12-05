@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const path = require('path');
 require('dotenv').config(); 
 
 const app = express();
@@ -13,7 +14,8 @@ const asyncHandler = fn => (req, res, next) => {
 
 // Middlewares
 app.use(cors()); 
-app.use(express.json()); 
+app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // 1. MongoDB Connection
 mongoose.connect(process.env.MONGO_URI)
@@ -23,6 +25,12 @@ mongoose.connect(process.env.MONGO_URI)
 // 2. Route Handling
 const userRoutes = require('./routes/userRoutes')(asyncHandler);
 app.use('/api/users', userRoutes); 
+
+const profileRoutes = require('./routes/profileRoutes');
+app.use('/api/profile', profileRoutes);
+
+const forumRoutes = require('./routes/forumRoutes');
+app.use('/api/forum', forumRoutes);
 
 // 3. Enhanced Global Error Handler
 app.use((err, req, res, next) => {

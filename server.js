@@ -20,9 +20,37 @@ mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB connected successfully'))
   .catch(err => console.error('MongoDB connection error:', err));
 
+  // Add this before your other routes
+// ✅ ADD TEST ROUTE HERE - BEFORE OTHER ROUTES
+app.post('/api/test-trainee', (req, res) => {
+    console.log('✅ Test route received data:', req.body);
+    res.json({ 
+        success: true, 
+        message: 'Test route working!',
+        received: req.body 
+    });
+});//temporary test route
+
 // 2. Route Handling
 const userRoutes = require('./routes/userRoutes')(asyncHandler);
 app.use('/api/users', userRoutes); 
+
+// Trainee routes
+const traineeRoutes = require('./routes/traineeRoutes')(asyncHandler);
+app.use('/api/trainee', traineeRoutes); 
+
+//Session routes
+const sessionRoutes = require('./routes/sessionRoutes')(asyncHandler);
+app.use('/api/session', sessionRoutes);
+
+const progressRoutes = require('./routes/progressRoutes')(asyncHandler);
+app.use('/api/progress', progressRoutes);
+
+const beltProgressRoutes = require('./routes/beltProgressRoutes');
+app.use('/api/belt-progress', beltProgressRoutes(asyncHandler));
+
+const resourceRoutes = require('./routes/resourceRoutes');
+app.use('/api/resource', resourceRoutes(asyncHandler));
 
 // 3. Enhanced Global Error Handler
 app.use((err, req, res, next) => {
@@ -52,6 +80,8 @@ app.use((err, req, res, next) => {
         ...(process.env.NODE_ENV === 'development' && { error: err.message })
     });
 });
+
+
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);

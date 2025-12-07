@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const path = require('path');
 require('dotenv').config(); 
 
 const app = express();
@@ -13,7 +14,8 @@ const asyncHandler = fn => (req, res, next) => {
 
 // Middlewares
 app.use(cors()); 
-app.use(express.json()); 
+app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // 1. MongoDB Connection
 mongoose.connect(process.env.MONGO_URI)
@@ -51,6 +53,11 @@ app.use('/api/belt-progress', beltProgressRoutes(asyncHandler));
 
 const resourceRoutes = require('./routes/resourceRoutes');
 app.use('/api/resource', resourceRoutes(asyncHandler));
+const profileRoutes = require('./routes/profileRoutes');
+app.use('/api/profile', profileRoutes);
+
+const forumRoutes = require('./routes/forumRoutes');
+app.use('/api/forum', forumRoutes);
 
 // 3. Enhanced Global Error Handler
 app.use((err, req, res, next) => {

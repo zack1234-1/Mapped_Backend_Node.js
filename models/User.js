@@ -13,7 +13,7 @@ const UserSchema = new Schema({
     email: { 
         type: String, 
         required: true, 
-        unique: true, // This automatically creates a unique index
+        unique: true,
         lowercase: true 
     },
     phone: { 
@@ -33,8 +33,32 @@ const UserSchema = new Schema({
         default: "" 
     },
     password: { 
-        type: String, 
-        required: true 
+        type: String,
+        required: function() {
+            return !this.googleId && !this.facebookId;
+        }
+    },
+    googleId: {
+        type: String,
+        unique: true,
+        sparse: true
+    },
+    facebookId: {
+        type: String,
+        unique: true,
+        sparse: true
+    },
+    isEmailVerified: {
+        type: Boolean,
+        default: false
+    },
+    registrationMethod: {
+        type: String,
+        enum: ['email', 'google', 'facebook'],
+        default: 'email'
+    },
+    lastLogin: {
+        type: Date
     },
     role: {
         type: String,
@@ -51,28 +75,33 @@ const UserSchema = new Schema({
     }
 });
 
-// Only create indexes for fields that don't already have unique: true
-// Remove any line that creates an index for email
-// ❌ DO NOT ADD: UserSchema.index({ email: 1 }, { unique: true });
+// Indexes
+UserSchema.index({ name: 1 });
+UserSchema.index({ role: 1 });
+UserSchema.index({ googleId: 1 }, { sparse: true });
+UserSchema.index({ facebookId: 1 }, { sparse: true });
 
-// Only add indexes for non-unique fields or compound indexes
-UserSchema.index({ name: 1 }); // Regular index for faster searching by name
-UserSchema.index({ role: 1 }); // Index for filtering by role
-
-// Fixed pre-save middleware
-UserSchema.pre('save', async function(next) { 
-    if (!this.isModified('password')) {
-        return next();
-    }
-    
+// Pre-save middleware - FIXED VERSION
+UserSchema.pre('save', async function(next) {
     try {
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(this.password, salt);
-        this.password = hashedPassword;
+        // Only hash password if it exists and is modified
+        if (this.password && this.isModified('password')) {
+            const salt = await bcrypt.genSalt(10);
+            const hashedPassword = await bcrypt.hash(this.password, salt);
+            this.password = hashedPassword;
+        }
         this.updatedAt = Date.now();
-        next();
+        
+        // If next exists (for Mongoose), call it
+        if (typeof next === 'function') {
+            next();
+        }
     } catch (err) {
-        next(err);
+        if (typeof next === 'function') {
+            next(err);
+        } else {
+            throw err;
+        }
     }
 });
 
@@ -82,8 +111,9 @@ UserSchema.pre('findOneAndUpdate', function(next) {
     next();
 });
 
-// Method to compare the entered password with the hashed password in the DB
+// Method to compare passwords
 UserSchema.methods.verifyPassword = async function(enteredPassword) {
+    if (!this.password) return false;
     return await bcrypt.compare(enteredPassword, this.password);
 };
 

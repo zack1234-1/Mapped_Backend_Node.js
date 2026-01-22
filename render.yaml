@@ -1,11 +1,11 @@
 services:
   - type: web
-    name: mapped-backend-api  
+    name: mapped-backend
     env: node
     plan: free
-    region: singapore  
+    region: singapore
     buildCommand: npm install
-    startCommand: node server.js
+    startCommand: npm start
     healthCheckPath: /health
     autoDeploy: true
     envVars:
@@ -14,14 +14,6 @@ services:
       - key: PORT
         value: 10000
       - key: MONGO_URI
-        sync: false  
-    headers:
-      - path: /*
-        name: Content-Security-Policy
-        value: ""
-      - path: /*
-        name: X-Content-Type-Options
-        value: nosniff
-      - path: /*
-        name: Cache-Control
-        value: "no-cache, no-store, must-revalidate"
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true

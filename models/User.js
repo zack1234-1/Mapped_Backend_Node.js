@@ -13,7 +13,7 @@ const UserSchema = new Schema({
     email: { 
         type: String, 
         required: true, 
-        unique: true, 
+        unique: true, // This automatically creates a unique index
         lowercase: true 
     },
     phone: { 
@@ -35,29 +35,69 @@ const UserSchema = new Schema({
     password: { 
         type: String, 
         required: true 
+    },
+    role: {
+        type: String,
+        enum: ['admin', 'instructor', 'trainee'],
+        default: 'trainee'
+    },
+    createdAt: {
+        type: Date,
+        default: Date.now
+    },
+    updatedAt: {
+        type: Date,
+        default: Date.now
     }
 });
 
-// Fixed middleware - remove next parameter and let async/await handle the flow
-UserSchema.pre('save', async function() { 
+// Only create indexes for fields that don't already have unique: true
+// Remove any line that creates an index for email
+// ❌ DO NOT ADD: UserSchema.index({ email: 1 }, { unique: true });
+
+// Only add indexes for non-unique fields or compound indexes
+UserSchema.index({ name: 1 }); // Regular index for faster searching by name
+UserSchema.index({ role: 1 }); // Index for filtering by role
+
+// Fixed pre-save middleware
+UserSchema.pre('save', async function(next) { 
     if (!this.isModified('password')) {
-        return; // Just return, no next needed
+        return next();
     }
     
     try {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(this.password, salt);
         this.password = hashedPassword;
-        // No next() call needed - the async function will complete naturally
+        this.updatedAt = Date.now();
+        next();
     } catch (err) {
-        // Throw the error and let Mongoose handle it
-        throw err;
+        next(err);
     }
+});
+
+// Update timestamp on update
+UserSchema.pre('findOneAndUpdate', function(next) {
+    this.set({ updatedAt: Date.now() });
+    next();
 });
 
 // Method to compare the entered password with the hashed password in the DB
 UserSchema.methods.verifyPassword = async function(enteredPassword) {
     return await bcrypt.compare(enteredPassword, this.password);
 };
+
+// Virtual for full name
+UserSchema.virtual('fullName').get(function() {
+    return this.name;
+});
+
+// Remove password from JSON output
+UserSchema.set('toJSON', {
+    transform: function(doc, ret) {
+        delete ret.password;
+        return ret;
+    }
+});
 
 module.exports = mongoose.model('User', UserSchema);

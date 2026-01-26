@@ -4,7 +4,7 @@ module.exports = (asyncHandler) => {
     const User = require('../models/User');
     const jwt = require('jsonwebtoken');
 
-    // 1. REGISTER (Email/Password)
+    // 1. REGISTER (Email/Password) - Only store name, email, password
     router.post('/register', asyncHandler(async (req, res, next) => {
         const { name, email, password } = req.body; 
 
@@ -18,11 +18,13 @@ module.exports = (asyncHandler) => {
                 });
             }
 
+            // Only store name, email, password
             user = new User({ 
                 name, 
                 email, 
-                password,
-                registrationMethod: 'email'
+                password
+                // Don't set registrationMethod here if it's not needed
+                // Let the model defaults handle it
             });
             await user.save();
             
@@ -41,8 +43,7 @@ module.exports = (asyncHandler) => {
                     id: user._id,
                     name: user.name,
                     email: user.email,
-                    avatar: user.avatar,
-                    role: user.role
+                    // Only return what's needed
                 }
             });
             
@@ -108,8 +109,7 @@ module.exports = (asyncHandler) => {
                     id: user._id,
                     name: user.name,
                     email: user.email,
-                    avatar: user.avatar,
-                    role: user.role
+                    // Only return basic user info
                 }
             });
         } catch (err) {
@@ -140,7 +140,7 @@ module.exports = (asyncHandler) => {
         }        
     }));
 
-    // 4. GOOGLE REGISTER/LOGIN
+    // 4. GOOGLE REGISTER/LOGIN - Simplified: only store name, email, googleId
     router.post('/google-register', asyncHandler(async (req, res) => {
         try {
             const { uid, email, name, photoUrl } = req.body;
@@ -159,29 +159,21 @@ module.exports = (asyncHandler) => {
                     });
                 }
 
-                // Update user with Google info
+                // Update user with Google ID if not already set
                 if (!user.googleId) {
                     user.googleId = uid;
+                    await user.save();
                 }
-                user.avatar = photoUrl || user.avatar;
-                user.isEmailVerified = true;
-                user.registrationMethod = 'google';
-                user.lastLogin = new Date();
-                await user.save();
                 
-                console.log('✅ Existing user updated with Google:', email);
+                console.log('✅ User exists, logging in with Google:', email);
             } else {
-                // Create new user with Google info
+                // Create new user with minimal info: name, email, googleId
                 user = new User({
                     name: name || email.split('@')[0],
                     email,
                     googleId: uid,
-                    avatar: photoUrl || '',
-                    isEmailVerified: true,
-                    registrationMethod: 'google',
-                    lastLogin: new Date(),
-                    // Generate a random password for Google users (won't be used)
-                    password: 'google_auth_' + uid.slice(0, 8) + Math.random().toString(36).slice(-4)
+                    // No password needed for Google users
+                    password: '' // Your model might require this, so set empty or handle in model
                 });
 
                 await user.save();
@@ -202,10 +194,8 @@ module.exports = (asyncHandler) => {
                 user: {
                     id: user._id,
                     name: user.name,
-                    email: user.email,
-                    avatar: user.avatar,
-                    role: user.role,
-                    isEmailVerified: user.isEmailVerified
+                    email: user.email
+                    // Don't return googleId to client for security
                 }
             });
 

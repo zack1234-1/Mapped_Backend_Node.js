@@ -49,16 +49,41 @@ const upload = multer({
     fileFilter: fileFilter
 });
 
-// --- ROUTES ---
-// GET PROFILE
+// GET PROFILE - Updated to handle both _id and googleId
 router.get('/:id', async (req, res) => {
     try {
-        const user = await User.findById(req.params.id).select('-password');
-        if (!user) return res.status(404).json({ msg: 'User not found' });
-        res.json(user);
+        let user;
+        
+        // Check if it's a MongoDB ObjectId format (24 hex chars)
+        if (req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
+            user = await User.findById(req.params.id).select('-password');
+        } else {
+            // Try searching by googleId or email
+            user = await User.findOne({
+                $or: [
+                    { googleId: req.params.id },
+                    { email: req.params.id }
+                ]
+            }).select('-password');
+        }
+        
+        if (!user) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'User not found' 
+            });
+        }
+        
+        res.json({
+            success: true,
+            data: user
+        });
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server Error');
+        console.error('Profile fetch error:', err.message);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Server Error: ' + err.message 
+        });
     }
 });
 

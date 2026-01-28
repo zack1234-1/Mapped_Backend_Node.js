@@ -13,7 +13,7 @@ const UserSchema = new Schema({
     email: { 
         type: String, 
         required: true, 
-        unique: true, 
+        unique: true,
         lowercase: true 
     },
     phone: { 
@@ -33,31 +33,101 @@ const UserSchema = new Schema({
         default: "" 
     },
     password: { 
-        type: String, 
-        required: true 
+        type: String,
+        required: function() {
+            return !this.googleId && !this.facebookId;
+        }
+    },
+    googleId: {
+        type: String,
+        unique: true,
+        sparse: true
+    },
+    facebookId: {
+        type: String,
+        unique: true,
+        sparse: true
+    },
+    isEmailVerified: {
+        type: Boolean,
+        default: false
+    },
+    registrationMethod: {
+        type: String,
+        enum: ['email', 'google', 'facebook'],
+        default: 'email'
+    },
+    lastLogin: {
+        type: Date
+    },
+    role: {
+        type: String,
+        enum: ['admin', 'instructor', 'trainee'],
+        default: 'trainee'
+    },
+    createdAt: {
+        type: Date,
+        default: Date.now
+    },
+    updatedAt: {
+        type: Date,
+        default: Date.now
     }
 });
 
-// Fixed middleware - remove next parameter and let async/await handle the flow
-UserSchema.pre('save', async function() { 
-    if (!this.isModified('password')) {
-        return; // Just return, no next needed
-    }
-    
+// Indexes
+UserSchema.index({ name: 1 });
+UserSchema.index({ role: 1 });
+UserSchema.index({ googleId: 1 }, { sparse: true });
+UserSchema.index({ facebookId: 1 }, { sparse: true });
+
+// Pre-save middleware - FIXED VERSION
+UserSchema.pre('save', async function(next) {
     try {
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(this.password, salt);
-        this.password = hashedPassword;
-        // No next() call needed - the async function will complete naturally
+        // Only hash password if it exists and is modified
+        if (this.password && this.isModified('password')) {
+            const salt = await bcrypt.genSalt(10);
+            const hashedPassword = await bcrypt.hash(this.password, salt);
+            this.password = hashedPassword;
+        }
+        this.updatedAt = Date.now();
+        
+        // If next exists (for Mongoose), call it
+        if (typeof next === 'function') {
+            next();
+        }
     } catch (err) {
-        // Throw the error and let Mongoose handle it
-        throw err;
+        if (typeof next === 'function') {
+            next(err);
+        } else {
+            throw err;
+        }
     }
 });
 
-// Method to compare the entered password with the hashed password in the DB
+// Update timestamp on update
+UserSchema.pre('findOneAndUpdate', function(next) {
+    this.set({ updatedAt: Date.now() });
+    next();
+});
+
+// Method to compare passwords
 UserSchema.methods.verifyPassword = async function(enteredPassword) {
+    if (!this.password) return false;
     return await bcrypt.compare(enteredPassword, this.password);
 };
+
+// Virtual for full name
+UserSchema.virtual('fullName').get(function() {
+    return this.name;
+});
+
+// Remove password from JSON output
+UserSchema.set('toJSON', {
+    transform: function(doc, ret) {
+        delete ret.password;
+        return ret;
+    }
+});
 
 module.exports = mongoose.model('User', UserSchema);

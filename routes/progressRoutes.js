@@ -1,21 +1,27 @@
+
 const express = require('express');
 const Progress = require('../models/progress');
 
-const TOTAL_POOMSAE_COUNT = 8;
-
 module.exports = (asyncHandler) => {
     const router = express.Router();
+    const TOTAL_FORM_COUNT = 8;
 
     // ==========================================
     // 1. POST /api/progress - Save/Update Progress inside the Array
     // ==========================================
     router.post('/', asyncHandler(async (req, res, next) => {
         console.log('=== PROGRESS SAVE REQUEST (Combined) ===');
-        const { traineeId, poomsae, techniques, kicks } = req.body;
+        
+        // Destructure mutable variables
+        let { traineeId, form, techniques, kicks } = req.body;
 
-        if (!traineeId || !poomsae) {
-            return res.status(400).json({ success: false, msg: 'Trainee ID and Poomsae are required' });
+        if (!traineeId || !form) {
+            return res.status(400).json({ success: false, msg: 'Trainee ID and Form are required' });
         }
+
+        // --- CRITICAL FIX: Trim form name to prevent duplicates ---
+        // This ensures "Pattern 2 " becomes "Pattern 2" so it matches the existing DB entry.
+        form = form.trim();
 
         // --- CALCULATION LOGIC ---
         let currentScore = 0;
@@ -39,7 +45,7 @@ module.exports = (asyncHandler) => {
 
         // The new form data object
         const newFormData = {
-            poomsae: poomsae,
+            form: form,
             techniques: techniques,
             kicks: kicks,
             totalScore: currentScore,
@@ -57,11 +63,13 @@ module.exports = (asyncHandler) => {
                     forms: [newFormData]
                 });
             } else {
-                // CASE B: Trainee exists. Check if this specific Poomsae exists in the array.
-                const formIndex = progressDoc.forms.findIndex(f => f.poomsae === poomsae);
+                // CASE B: Trainee exists. Check if this specific Form exists in the array.
+                // Because we trimmed 'form' above, this will now correctly find the existing entry.
+                const formIndex = progressDoc.forms.findIndex(f => f.form === form);
 
                 if (formIndex > -1) {
                     // Update existing form in the array
+                    // We merge existing data with new data to preserve _id if needed, though usually subdoc replacement is fine
                     progressDoc.forms[formIndex] = { ...progressDoc.forms[formIndex].toObject(), ...newFormData };
                 } else {
                     // Add new form to the array
@@ -70,63 +78,18 @@ module.exports = (asyncHandler) => {
             }
 
             // ======================================================
-            // === NEW: Calculate and Store Overall Average ===
-            // ======================================================
-            // if (progressDoc.forms && progressDoc.forms.length > 0) {
-            //     const totalPercent = progressDoc.forms.reduce((sum, form) => sum + (form.percentage || 0), 0);
-            //     progressDoc.overallAverage = totalPercent / progressDoc.forms.length;
-            // } else {
-            //     progressDoc.overallAverage = 0.0;
-            // }
-            // if (progressDoc.forms && progressDoc.forms.length > 0) {
-            //     let globalTotalScore = 0;
-            //     let globalMaxPossible = 0;
-
-            //     progressDoc.forms.forEach(form => {
-            //         // 1. Add User's Score
-            //         globalTotalScore += (form.totalScore || 0);
-
-            //         // 2. Calculate Max Points for this specific form
-            //         // Check if properties exist and get their size/length
-            //         let techCount = 0;
-            //         let kickCount = 0;
-
-            //         // Handle Mongoose Map or standard Object
-            //         if (form.techniques) {
-            //             // If it's a Mongoose Map, use .size, otherwise Object.keys
-            //             techCount = (form.techniques instanceof Map) ? form.techniques.size : Object.keys(form.techniques).length;
-            //         }
-            //         if (form.kicks) {
-            //              kickCount = (form.kicks instanceof Map) ? form.kicks.size : Object.keys(form.kicks).length;
-            //         }
-
-            //         const formMaxScore = (techCount + kickCount) * 2;
-            //         globalMaxPossible += formMaxScore;
-            //     });
-
-            //     // 3. Final Division
-            //     if (globalMaxPossible > 0) {
-            //         progressDoc.overallAverage = globalTotalScore / globalMaxPossible;
-            //     } else {
-            //         progressDoc.overallAverage = 0.0;
-            //     }
-            // } else {
-            //     progressDoc.overallAverage = 0.0;
-            // }
-
-            // ======================================================
             // === FIXED: Curriculum Average Calculation ===
             // ======================================================
             if (progressDoc.forms && progressDoc.forms.length > 0) {
                 let sumPercentages = 0;
 
                 // Sum up percentages of all saved forms
-                progressDoc.forms.forEach(form => {
-                    sumPercentages += (form.percentage || 0);
+                progressDoc.forms.forEach(formItem => {
+                    sumPercentages += (formItem.percentage || 0);
                 });
 
                 // Divide by the fixed total count (8), treating missing forms as 0%
-                progressDoc.overallAverage = sumPercentages / TOTAL_POOMSAE_COUNT;
+                progressDoc.overallAverage = sumPercentages / TOTAL_FORM_COUNT;
 
                 // Safety Cap
                 if (progressDoc.overallAverage > 1) progressDoc.overallAverage = 1;
@@ -137,7 +100,7 @@ module.exports = (asyncHandler) => {
 
             await progressDoc.save();
 
-            console.log(`✅ Combined Progress saved. Form: ${poomsae}, Form Score: ${(percentage*100).toFixed(0)}%, Overall Avg: ${(progressDoc.overallAverage*100).toFixed(0)}%`);
+            console.log(`✅ Combined Progress saved. Form: "${form}", Form Score: ${(percentage*100).toFixed(0)}%, Overall Avg: ${(progressDoc.overallAverage*100).toFixed(0)}%`);
 
             res.status(200).json({
                 success: true,
@@ -152,11 +115,14 @@ module.exports = (asyncHandler) => {
     }));
 
     // ==========================================
-    // 2. GET /api/progress/:traineeId/:poomsae 
+    // 2. GET /api/progress/:traineeId/:form 
     // ==========================================
-    router.get('/:traineeId/:poomsae', asyncHandler(async (req, res) => {
-        const { traineeId, poomsae } = req.params;
-        const decodedPoomsae = decodeURIComponent(poomsae);
+    router.get('/:traineeId/:form', asyncHandler(async (req, res) => {
+        const { traineeId, form } = req.params;
+        
+        // --- CRITICAL FIX: Trim the decoded form name ---
+        // Frontend sends encoded "Pattern%202%20", we decode then trim to "Pattern 2"
+        const decodedForm = decodeURIComponent(form).trim();
 
         try {
             // Find the big document
@@ -169,8 +135,8 @@ module.exports = (asyncHandler) => {
                 });
             }
 
-            // Find the specific form inside the array
-            const specificForm = progressDoc.forms.find(f => f.poomsae === decodedPoomsae);
+            // Find the specific form inside the array using the trimmed name
+            const specificForm = progressDoc.forms.find(f => f.form === decodedForm);
 
             if (!specificForm) {
                 return res.status(200).json({
@@ -203,14 +169,20 @@ module.exports = (asyncHandler) => {
             if (!progressDoc || !progressDoc.forms || progressDoc.forms.length === 0) {
                 return res.status(200).json({
                     success: true,
-                    data: [] // Return empty list
+                    data: {
+                    forms: [],
+                    overallAverage: 0.0 // Default to 0
+                }
                 });
             }
 
             // Return all forms so frontend can calculate average
             res.status(200).json({
                 success: true,
-                data: progressDoc.forms
+                data: {
+                forms: progressDoc.forms,
+                overallAverage: progressDoc.overallAverage || 0.0 
+            }
             });
 
         } catch (err) {

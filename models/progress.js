@@ -3,7 +3,7 @@ const Schema = mongoose.Schema;
 
 // Define a Sub-Schema for the individual form data
 const FormProgressSchema = new Schema({
-    poomsae: {
+    form: {
         type: String,
         required: true,
         trim: true

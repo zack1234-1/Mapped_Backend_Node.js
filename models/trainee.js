@@ -13,7 +13,7 @@ const TraineeSchema = new Schema({
         required: [true, 'Belt is required'],
         trim: true,
         enum: {
-            values: ['White', 'Yellow', 'Green', 'Blue', 'Red', 'Black'],
+            values: ['White', 'Yellow', 'Green', 'Blue', 'Brown', 'Black'],
             message: '{VALUE} is not a valid belt color'
         }
     },

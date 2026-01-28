@@ -7,6 +7,20 @@ const toTitleCase = (str) => {
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 };
 
+// --- NEW HELPER: Extract Hashtags (Keeps the '#') ---
+const extractHashtags = (text) => {
+    if (!text) return [];
+    // Regex to find #tag, #tag_name, #tag123
+    const matches = text.match(/#[a-z0-9_]+/gi);
+    
+    // Return empty array if no matches, otherwise return the array of tags
+    // (We do NOT remove the '#' here because you want to save ["#world"])
+    if (!matches) return [];
+    
+    // Optional: Remove duplicates using Set
+    return [...new Set(matches)];
+};
+
 // Helper: Format Date for JSON response (matches your Trainee logic)
 const formatDate = (date) => {
     if (!date) return null;
@@ -28,23 +42,33 @@ module.exports = (asyncHandler) => {
         let {
             title, // This maps to 'text' from your Flutter CreatePostScreen
             type,  // 'image', 'link', etc.
-            url,   // This maps to 'image' path/url from Flutter
-            location,
+           imageUrls, 
+           videoUrls, 
+           linkUrl,   // This maps to 'image' path/url from Flutter
             author,
+            tag,
             description
         } = req.body;
 
-        // 1. Validate required fields
-        if (!title || !type || !url) {
-            console.log('❌ Missing required fields (title, type, or url)');
+         // 1. Validate required fields
+        if (!title || !type) {
+            console.log('❌ Missing title or type');
             return res.status(400).json({
                 success: false,
-                msg: 'Title, Type, and URL are required'
+                msg: 'Title and Type are required'
             });
         }
 
+        // Ensure arrays are initialized if missing
+        if (!imageUrls) imageUrls = [];
+        if (!videoUrls) videoUrls = [];
+        if (!linkUrl) linkUrl = "";
+
         // 2. Format Type to Title Case (e.g., "image" -> "Image") to match Enum
         type = toTitleCase(type);
+
+        const fullText = (title + ' ' + (description || '')).trim();
+        const extractedTags = extractHashtags(fullText);
 
         try {
             // Create new Resource
@@ -52,10 +76,11 @@ module.exports = (asyncHandler) => {
                 title,
                 description,
                 type,
-                url,
-                location: location || 'Johor Bahru, Malaysia',
+                imageUrls, // Save specific image URLs
+                videoUrls, // Save specific video URLs
+                linkUrl,
+                tags: extractedTags, // --- STEP 2: SAVE TO DB ---
                 author: author || 'Lieyza Wahab',
-                subtitle: type === 'Link' ? 'Web Resource' : 'Community Post'
             });
 
             console.log('3. Saving resource to database...');
@@ -71,8 +96,10 @@ module.exports = (asyncHandler) => {
                     title: resource.title,
                     description: resource.description,
                     type: resource.type,
-                    url: resource.url,
-                    location: resource.location,
+                    imageUrls: resource.imageUrls,
+                    videoUrls: resource.videoUrls,
+                    linkUrl: resource.linkUrl,
+                    tags: resource.tags, // You will see ["#world"] here
                     createdAt: formatDate(resource.createdAt)
                 }
             });
@@ -129,12 +156,23 @@ module.exports = (asyncHandler) => {
 
             console.log(`✅ Found ${resources.length} resources`);
 
-            const formattedResources = resources.map(r => ({
-                ...r,
-                id: r._id,
-                date: formatDate(r.createdAt),
-                isLocalFile: !r.url.startsWith('http') 
-            }));
+             const formattedResources = resources.map(r => {
+                // Determine if local file based on imageUrls
+                // (Since videos/links are usually external or handled differently)
+                let isLocal = false;
+                if (r.imageUrls && r.imageUrls.length > 0) {
+                    isLocal = !r.imageUrls[0].startsWith('http');
+                }
+
+                return {
+                    ...r,
+                    id: r._id,
+                    date: formatDate(r.createdAt),
+                    isLocalFile: isLocal,
+                    // Ensure generic 'urls' field exists for older UI compatibility if needed
+                    urls: r.imageUrls.length > 0 ? r.imageUrls : (r.videoUrls.length > 0 ? r.videoUrls : (r.linkUrl ? [r.linkUrl] : []))
+                };
+            });
 
             res.json({
                 success: true,

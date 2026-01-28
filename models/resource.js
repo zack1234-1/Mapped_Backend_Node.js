@@ -2,12 +2,12 @@ const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
 const ResourceSchema = new Schema({
-    title: {
+     author: {
         type: String,
-        required: [true, 'Title/Caption is required'],
-        trim: true,
-        maxlength: [300, 'Caption cannot exceed 300 characters']
+        default: 'Lieyza Wahab', 
+        trim: true
     },
+
     type: {
         type: String,
         required: [true, 'Resource type is required'],
@@ -17,40 +17,44 @@ const ResourceSchema = new Schema({
             message: '{VALUE} is not a valid resource type'
         }
     },
-    url: {
-        type: String,
-        required: [true, 'Media URL or Path is required'],
-        trim: true
-    },
 
-    tags: {
-        type: [String], // Array of strings
-        default: []
-    },
-
-    location: {
+    title: {
         type: String,
+        required: [true, 'Title/Caption is required'],
         trim: true,
-        default: 'Johor Bahru, Malaysia' // Default per your UI
-    },
-    author: {
-        type: String,
-        default: 'Lieyza Wahab', // Hardcoded based on your UI, or pass dynamically
-        trim: true
-    },
-    subtitle: {
-        type: String,
-        trim: true,
-        default: '' // Optional subtitle
+        maxlength: [300, 'Caption cannot exceed 300 characters']
     },
 
     description: {
         type: String,
         trim: true,
-        default: '' // Optional description
-    }
+        default: '' 
+    },
+
+
+    tags: {
+        type: [String], 
+        default: []
+    },
+    
+    imageUrls: {
+        type: [String], 
+        default: [] 
+    },
+    
+    videoUrls: {
+        type: [String], 
+        default: [] 
+    },
+
+    linkUrl: {
+        type: String,
+        trim: true,
+        default: ''
+    },
+   
 }, {
-    timestamps: true // Adds createdAt and updatedAt automatically
+    timestamps: true 
 });
 
 // Indexes for sorting and filtering

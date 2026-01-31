@@ -5,330 +5,267 @@ const User = require('../models/User');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const mongoose = require('mongoose');
 
-// --- MULTER SETUP FOR IMAGE UPLOADS ---
+// --- MULTER SETUP ---
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         const dir = './uploads/posts';
-        if (!fs.existsSync(dir)){
-            fs.mkdirSync(dir, { recursive: true });
-        }
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         cb(null, 'uploads/posts/'); 
     },
     filename: (req, file, cb) => {
         cb(null, `post-${Date.now()}${path.extname(file.originalname)}`);
     }
 });
+const upload = multer({ storage: storage, limits: { fileSize: 5 * 1024 * 1024 } });
 
-const upload = multer({ 
-    storage: storage,
-    limits: { fileSize: 1024 * 1024 * 5 }, // 5MB limit
-    fileFilter: (req, file, cb) => {
-        const allowedTypes = /jpeg|jpg|png|gif/;
-        const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-        const mimetype = allowedTypes.test(file.mimetype);
-        
-        if (mimetype && extname) {
-            return cb(null, true);
-        } else {
-            cb('Error: Images Only!');
-        }
-    }
-});
-
-// --- ROUTES ---
-
-// 1. CREATE A POST
-// POST /api/forum
-// Body: { userId, text, tags (comma separated) }
-// File: postImage (optional)
-router.post('/', upload.single('postImages', 10), async (req, res) => {
+// 1. CREATE POST
+router.post('/', upload.array('postImages', 10), async (req, res) => {
     try {
-        const user = await User.findById(req.body.userId).select('-password');
+        const userId = req.body.userId; 
+        if (!userId) {
+            return res.status(400).json({ msg: 'Missing userId' });
+        }
+        
+        // Validate ID format to prevent crashes
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+             return res.status(400).json({ msg: 'Invalid userId format' });
+        }
+
+        const user = await User.findById(userId).select('-password');
         if (!user) return res.status(404).json({ msg: 'User not found' });
 
-        let imagePaths = [];
+        let imageUrls = [];
         if (req.files && req.files.length > 0) {
-            imagePaths = req.files.map(file => file.path.replace(/\\/g, "/"));
+            imageUrls = req.files.map(file => file.path.replace(/\\/g, "/"));
         }
 
         let tags = [];
         if (req.body.tags) {
-            tags = req.body.tags
-                .split(',')
-                .map(tag => tag.trim())
-                .filter(tag => tag.length > 0);
+            tags = req.body.tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0);
         }
 
         const newPost = new Post({
             text: req.body.text,
-            name: user.name,
+            name: user.name || user.username,
             avatar: user.avatar,
-            user: req.body.userId,
-            image: imagePaths.length > 0 ? imagePaths[0] : "",
-            images: imagePaths,
-            tags: tags,
-            videoUrl: req.body.videoUrl || "", 
-            videoThumbnail: req.body.videoThumbnail || ""
+            user: userId,
+            images: imageUrls,
+            videoUrl: req.body.videoUrl || '',
+            videoThumbnail: req.body.videoThumbnail || '',
+            tags: tags
         });
 
         const post = await newPost.save();
         res.json(post);
-
     } catch (err) {
-        console.error(err.message);
+        console.error('Create Post Error:', err);
         res.status(500).json({ msg: 'Server Error', error: err.message });
     }
 });
 
-// 2. GET ALL POSTS (Feed)
-// GET /api/forum
+// 2. GET ALL POSTS
 router.get('/', async (req, res) => {
     try {
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
-        const skip = (page - 1) * limit;
-
-        const posts = await Post.find()
-            .sort({ date: -1 })
-            .populate('user', ['name', 'avatar']);
+        const posts = await Post.find().sort({ isPinned: -1, date: -1 });
         res.json(posts);
     } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ msg: 'Server Error' });
+        console.error('Get Posts Error:', err);
+        res.status(500).json({ msg: 'Server Error', error: err.message });
     }
 });
 
-// 3. GET ALL UNIQUE TAGS
-// GET /api/forum/tags
+// 3. GET POPULAR TAGS (MOVED UP - Must be before /:id)
 router.get('/tags', async (req, res) => {
     try {
-        // Aggregate all unique tags from all posts
-        const tags = await Post.distinct('tags');
-        
-        // Filter out empty strings and sort alphabetically
-        const filteredTags = tags
-            .filter(tag => tag && tag.trim() !== '')
-            .sort();
-        
-        res.json(filteredTags);
+        const tags = await Post.aggregate([
+            { $unwind: "$tags" },
+            { $group: { _id: "$tags", count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: 20 },
+            { $project: { _id: 0, name: "$_id", count: 1 } }
+        ]);
+        res.json(tags);
     } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ msg: 'Server Error' });
+        console.error('Get Tags Error:', err);
+        res.status(500).json({ msg: 'Server Error', error: err.message });
     }
 });
 
-// 4. SEARCH POSTS
-// GET /api/forum/search?q=kick&tag=taekwondo
+// 4. SEARCH POSTS (MOVED UP - Must be before /:id)
 router.get('/search', async (req, res) => {
     try {
-        const { q, tag } = req.query;
+        const { q, tag } = req.query; 
 
-        // 1. If neither is provided, return empty or error
         if (!q && !tag) {
-            return res.status(400).json({ msg: 'Please provide a search query or tag' });
+            return res.status(400).json({ msg: 'No query or tag provided' });
         }
 
-        let filter = {};
+        let query = {};
 
-        // 2. Handle Tag Filtering (If a tag is selected)
+        // Tag search
         if (tag) {
-            // This handles both "Taekwondo" and "#Taekwondo" to match whatever is in your DB
-            const cleanTag = tag.replace('#', ''); 
-            filter.tags = { $in: [cleanTag, `#${cleanTag}`] };
+            query.tags = { $regex: tag, $options: 'i' };
         }
 
-        // 3. Handle Text Search (If user typed something)
+        // Text search (combined with tag if both exist)
         if (q) {
-            const safeQuery = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-            if (tag) {
-                // SCENARIO: Tag AND Text
-                // We restrict the text search to content and author name only
-                // (We don't need to search tags array for 'q' because we already filtered by specific tag above)
-                filter.$or = [
-                    { text: { $regex: safeQuery, $options: 'i' } }, // Searches Content
-                    { tags: { $regex: safeQuery, $options: 'i' } }, // Searches Tags
-                    { name: { $regex: safeQuery, $options: 'i' } }  // Searches Name
-                ];
-            } else {
-                // SCENARIO: Text Only (Global Search)
-                // Search everywhere: Content, Name, AND Tags
-                filter.$or = [
-                    { text: { $regex: safeQuery, $options: 'i' } },
-                    { tags: { $regex: safeQuery, $options: 'i' } },
-                    { name: { $regex: safeQuery, $options: 'i' } }
-                ];
-            }
+            query.$or = [
+                { text: { $regex: q, $options: 'i' } },
+                { tags: { $regex: q, $options: 'i' } }, 
+                { name: { $regex: q, $options: 'i' } }
+            ];
         }
 
-        const posts = await Post.find(filter)
-            .sort({ date: -1 })
-            .populate('user', ['name', 'avatar']);
-
+        const posts = await Post.find(query).sort({ isPinned: -1, date: -1 });
         res.json(posts);
-
     } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ msg: 'Server Error' });
+        console.error('Search Posts Error:', err);
+        res.status(500).json({ msg: 'Server Error', error: err.message });
     }
 });
 
-// 5. GET A SINGLE POST
-// GET /api/forum/:id
+// 5. GET SINGLE POST (MOVED DOWN - This catches everything else)
 router.get('/:id', async (req, res) => {
     try {
-        const post = await Post.findById(req.params.id)
-            .populate('user', ['name', 'avatar'])
-            .populate('comments.user', ['name', 'avatar']);
-        
-        if (!post) {
-            return res.status(404).json({ msg: 'Post not found' });
+        // Double check ID validity before querying
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(404).json({ msg: 'Post not found (Invalid ID)' });
         }
+
+        const post = await Post.findById(req.params.id);
+        if (!post) return res.status(404).json({ msg: 'Post not found' });
         
         res.json(post);
     } catch (err) {
-        console.error(err.message);
-        if (err.kind === 'ObjectId') {
-            return res.status(404).json({ msg: 'Post not found' });
-        }
-        res.status(500).json({ msg: 'Server Error' });
+        console.error('Get Single Post Error:', err);
+        res.status(500).json({ msg: 'Server Error', error: err.message });
     }
 });
 
-// 6. LIKE/UNLIKE A POST
-// PUT /api/forum/like/:id
-// Body: { userId }
-router.put('/like/:id', async (req, res) => {
+// 6. TOGGLE PIN
+router.put('/pin/:id', async (req, res) => {
     try {
-        // SECURITY FIX: Use req.user.id
-        const userId = req.body.userId; 
+        const post = await Post.findById(req.params.id);
+        if (!post) return res.status(404).json({ msg: 'Post not found' });
+
+        post.isPinned = !post.isPinned;
+        await post.save();
+
+        res.json(post);
+    } catch (err) {
+        console.error('Toggle Pin Error:', err);
+        res.status(500).json({ msg: 'Server Error', error: err.message });
+    }
+});
+
+// 7. REPORT A POST
+router.post('/report/:id', async (req, res) => {
+    try {
+        const { userId, reason } = req.body;
+        
+        if (!userId || !reason) return res.status(400).json({ msg: 'Missing userId or reason' });
 
         const post = await Post.findById(req.params.id);
         if (!post) return res.status(404).json({ msg: 'Post not found' });
 
-        // Check if user already liked
-        const isLiked = post.likes.some(like => like.user.toString() === userId);
+        const alreadyReported = post.reports.some(r => r.user.toString() === userId);
+        if (alreadyReported) return res.status(400).json({ msg: 'You have already reported this post' });
 
-        if (isLiked) {
-            // ATOMIC: Pull (Remove) the like
-            await Post.findByIdAndUpdate(req.params.id, {
-                $pull: { likes: { user: userId } }
-            });
-        } else {
-            // ATOMIC: AddToSet (Add only if unique)
-            await Post.findByIdAndUpdate(req.params.id, {
-                $addToSet: { likes: { user: userId } }
-            });
-        }
+        post.reports.push({ user: userId, reason: reason });
+        await post.save();
 
-        // Return the updated likes array
-        const updatedPost = await Post.findById(req.params.id);
-        res.json(updatedPost.likes);
-
+        res.json({ msg: 'Report submitted successfully', reports: post.reports });
     } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ msg: 'Server Error' });
+        console.error('Report Post Error:', err);
+        res.status(500).json({ msg: 'Server Error', error: err.message });
     }
 });
 
-// 7. ADD A COMMENT
-// POST /api/forum/comment/:id
-// Body: { userId, text }
-router.post('/comment/:id', async (req, res) => {
+// 8. LIKE POST
+router.put('/like/:id', async (req, res) => {
     try {
-        const user = await User.findById(req.body.userId).select('-password');
-        const post = await Post.findById(req.params.id);
+        const { userId } = req.body;
+        if (!userId) return res.status(400).json({ msg: 'Missing userId' });
 
-        if (!post) {
-            return res.status(404).json({ msg: 'Post not found' });
+        const post = await Post.findById(req.params.id);
+        if (!post) return res.status(404).json({ msg: 'Post not found' });
+
+        const likeIndex = post.likes.findIndex(like => like.user.toString() === userId);
+
+        if (likeIndex > -1) {
+            post.likes.splice(likeIndex, 1);
+        } else {
+            post.likes.unshift({ user: userId });
         }
 
+        await post.save();
+        res.json(post.likes);
+    } catch (err) {
+        console.error('Like Post Error:', err);
+        res.status(500).json({ msg: 'Server Error', error: err.message });
+    }
+});
+
+// 9. COMMENT ON POST
+router.post('/comment/:id', async (req, res) => {
+    try {
+        const { userId, text } = req.body;
+        if (!userId || !text) return res.status(400).json({ msg: 'Missing userId or text' });
+
+        const user = await User.findById(userId).select('-password');
+        if (!user) return res.status(404).json({ msg: 'User not found' });
+
+        const post = await Post.findById(req.params.id);
+        if (!post) return res.status(404).json({ msg: 'Post not found' });
+
         const newComment = {
-            text: req.body.text,
-            name: user.name,
+            text: text.trim(),
+            name: user.name || user.username,
             avatar: user.avatar,
-            user: req.body.userId
+            user: userId,
+            date: new Date()
         };
 
         post.comments.unshift(newComment);
         await post.save();
-
+        
         res.json(post.comments);
-
     } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ msg: 'Server Error' });
+        console.error('Comment Post Error:', err);
+        res.status(500).json({ msg: 'Server Error', error: err.message });
     }
 });
 
-// 8. DELETE A COMMENT
-// DELETE /api/forum/comment/:id/:comment_id
-// Body: { userId }
-router.delete('/comment/:id/:comment_id', async (req, res) => {
-    try {
-        const post = await Post.findById(req.params.id);
-
-        if (!post) {
-            return res.status(404).json({ msg: 'Post not found' });
-        }
-
-        const comment = post.comments.find(
-            comment => comment.id === req.params.comment_id
-        );
-
-        if (!comment) {
-            return res.status(404).json({ msg: 'Comment not found' });
-        }
-
-        // Check if user owns the comment
-        if (comment.user.toString() !== req.body.userId) {
-            return res.status(401).json({ msg: 'User not authorized' });
-        }
-
-        post.comments = post.comments.filter(
-            comment => comment.id !== req.params.comment_id
-        );
-
-        await post.save();
-        res.json(post.comments);
-
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ msg: 'Server Error' });
-    }
-});
-
-// 9. DELETE A POST
-// DELETE /api/forum/:id
-// Body: { userId }
+// 10. DELETE POST
 router.delete('/:id', async (req, res) => {
     try {
+        const { userId } = req.body;
+        if (!userId) return res.status(400).json({ msg: 'Missing userId' });
+
         const post = await Post.findById(req.params.id);
+        if (!post) return res.status(404).json({ msg: 'Post not found' });
 
-        if (!post) {
-            return res.status(404).json({ msg: 'Post not found' });
+        if (post.user.toString() !== userId) {
+            return res.status(401).json({ msg: 'User not authorized to delete this post' });
         }
 
-        // Check if user owns the post
-        if (post.user.toString() !== req.body.userId) {
-            return res.status(401).json({ msg: 'User not authorized' });
+        // Delete associated files
+        if (post.images && post.images.length > 0) {
+            post.images.forEach(imagePath => {
+                if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
+            });
+        }
+        if (post.image && fs.existsSync(post.image)) {
+            fs.unlinkSync(post.image);
         }
 
-        // Delete image file if exists
-        if (post.image) {
-            const imagePath = path.join(__dirname, '..', post.image);
-            if (fs.existsSync(imagePath)) {
-                fs.unlinkSync(imagePath);
-            }
-        }
-
-        await post.deleteOne();
-        res.json({ msg: 'Post removed' });
-
+        await Post.findByIdAndDelete(req.params.id);
+        res.json({ msg: 'Post deleted successfully' });
     } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ msg: 'Server Error' });
+        console.error('Delete Post Error:', err);
+        res.status(500).json({ msg: 'Server Error', error: err.message });
     }
 });
 

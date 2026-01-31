@@ -86,6 +86,7 @@ module.exports = (asyncHandler) => {
         console.log('📥 Received request body:', req.body);
 
         const {
+            trainerId,
             trainer,
             date, // Comes in as "Wed, Sept 21, 2025"
             startTime,  // Flutter now sends ISO String
@@ -95,7 +96,7 @@ module.exports = (asyncHandler) => {
         } = req.body;
 
         // Validation
-        if (!trainer || !date ||!startTime || !endTime|| !venue || !totalTrainees) {
+        if (!trainerId || !trainer || !date ||!startTime || !endTime|| !venue || !totalTrainees) {
             return res.status(400).json({
                 success: false,
                 msg: 'All fields are required'
@@ -120,14 +121,11 @@ module.exports = (asyncHandler) => {
 
             // Create new session
             const session = new Session({
+                trainerId,
                 trainer,
                 date: parsedDate, 
-
                 startTime: mytStartTime, 
                 endTime: mytEndTime,
-          
-                // startTime: new Date(startTime), // Save Actual Date Object
-                // endTime: new Date(endTime),     // Save Actual Date Object
                 venue,
                 totalTrainees: parseInt(totalTrainees)
             });
@@ -165,10 +163,17 @@ module.exports = (asyncHandler) => {
     // ==================================================
     router.get('/dashboard', asyncHandler(async (req, res) => {
         console.log('📥 GET Dashboard Data');
+        const { trainerId, trainer } = req.query;
+        if (!trainerId && !trainer) {
+        return res.status(400).json({ success: false, msg: "Trainer info missing" });
+    }
+
         
         try {
-            // Get all sessions
-            const sessions = await Session.find({}).lean();
+            const query = trainerId ? { trainerId: trainerId } : { trainer: trainer };
+        
+        // 4. ADDED: Fetch sessions from MongoDB based on the trainer
+            const sessions = await Session.find(query).lean();
             const now = new Date();
             now.setHours(now.getHours() + 8); // Shift server time to match DB time
 
@@ -178,26 +183,18 @@ module.exports = (asyncHandler) => {
             
             sessions.forEach(session => {
                 try {
-                    // 🛑 SAFETY CHECK 1: Ensure fields exist
-                    // If a record is missing startTime or endTime, skip it immediately.
                     if (!session.startTime || !session.endTime) {
                         return; 
                     }
 
                     const start = new Date(session.startTime);
                     const end = new Date(session.endTime);
-                    
-                    // 🛑 SAFETY CHECK 2: Ensure Dates are valid
+                
                     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
                         console.log(`⚠️ Invalid Date found for session ${session._id}`)
                         return; 
                     }
 
-                    // --- ROBUST DATE HANDLING ---
-                    // If 'date' field is missing or broken, fallback to 'startTime'
-                    // This prevents crash if the text date (Wed, Dec...) is invalid
-                    
-                    // ✅ FIX: Uncomment this line so dateObj is defined
                     let dateObj = session.date ? new Date(session.date) : start;
 
                     if (isNaN(dateObj.getTime())) {
@@ -217,18 +214,7 @@ module.exports = (asyncHandler) => {
                     
                     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                    
-                    // const formattedDate = `${days[dateObj.getDay()]}, ${months[dateObj.getMonth()]} ${dateObj.getDate()}, ${dateObj.getFullYear()}`;
-                    //  let dateObj = session.date ? new Date(session.date) : start;
-                    // --- FORMAT TIME FOR UI ---
-                    // const formatTime = (d) => {
-                    //     return d.toLocaleTimeString('en-US', {
-                    //         hour: 'numeric',
-                    //         minute: '2-digit',
-                    //         hour12: true,
-                    //         timeZone: 'Asia/Kuala_Lumpur'
-                    //     });
-                    // };
+                
                     
                     let dObj = session.date ? new Date(session.date) : start;
                     if (isNaN(dObj.getTime())) dObj = start;
@@ -236,31 +222,13 @@ module.exports = (asyncHandler) => {
                     session.uiDate = `${days[dObj.getUTCDay()]}, ${months[dObj.getUTCMonth()]} ${dObj.getUTCDate()}, ${dObj.getUTCFullYear()}`;
                     session.time = `${formatTime(start)} - ${formatTime(end)}`;
 
-                    // Helper to check if it's the same calendar day (ignoring time)
-                    // const isSameDay = (d1, d2) => {
-                    //     return d1.getFullYear() === d2.getFullYear() &&
-                    //            d1.getMonth() === d2.getMonth() &&
-                    //            d1.getDate() === d2.getDate();
-                    // };
 
                     const isSameDay = 
                         start.getUTCFullYear() === now.getUTCFullYear() &&
                         start.getUTCMonth() === now.getUTCMonth() &&
                         start.getUTCDate() === now.getUTCDate();
 
-                    // // 1. Current: Matches TODAY'S date AND has not ended yet
-                    // if (isSameDay(start, now) &&now >= start && now <= end) {
-                    //     current.push(session);
-                    // } 
-                    // // 2. Upcoming: Future dates (tomorrow onwards)
-                    // else if (now < start && !isSameDay(start, now)) {
-                    //     upcoming.push(session);
-                    // } 
-                    // // 3. History: Past dates OR Today's sessions that have already finished
-                    // else {
-                    //     history.push(session);
-                    // }
-                    
+                
                     // 1. CURRENT: Anything scheduled for TODAY
                     if (isSameDay) {
                         // IT IS TODAY
@@ -287,14 +255,11 @@ module.exports = (asyncHandler) => {
                 }
             });
 
-            // Current: Nearest end time first
             current.sort((a, b) => new Date(a.endTime) - new Date(b.endTime));
-
-            // Upcoming: Nearest future first (Ascending)
             upcoming.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
-            
-            // History: Most recent past first (Descending)
             history.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+
+             const totalPlanned = current.length + upcoming.length + history.length;
             
             res.json({
                 success: true,
@@ -303,6 +268,7 @@ module.exports = (asyncHandler) => {
                     current: current, // This remains a single object or null based on your logic
                     upcoming: upcoming, 
                     history: history,    
+                    totalSessionsCount: sessions.length
                 }
             });
         } catch (err) {

@@ -102,6 +102,11 @@ router.post('/', upload.any(), async (req, res) => {
             tags = [...new Set(tags)];
         }
 
+        // Ensure arrays are initialized if missing
+        if (!imageUrls) imageUrls = [];
+        if (!videoUrls) videoUrls = [];
+        if (!linkUrl) linkUrl = "";
+
         // Determine Type
         let finalType = 'Text';
         const inputType = type || resourceType;

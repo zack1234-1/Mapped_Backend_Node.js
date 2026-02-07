@@ -1,11 +1,13 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const multer = require("multer");
+const cloudinary = require("./config/cloudinary");
 const path = require('path');
 require('dotenv').config();
 
 const app = express();
-const port = process.env.PORT || 5000;
+const port = process.env.PORT || 5001;
 
 // Utility function to wrap async route handlers
 const asyncHandler = fn => (req, res, next) => {
@@ -27,6 +29,40 @@ app.get('/health', (req, res) => {
     uptime: process.uptime()
   });
 });
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
+
+app.post("/uploadTest", upload.single("image"), async (req, res) => {
+  try {
+    // Check if file exists
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    // Upload to cloudinary using upload_stream
+    const uploadStream = cloudinary.uploader.upload_stream(
+      { folder: "posts" },
+      (error, result) => {
+        if (error) {
+          console.error("Cloudinary error:", error);
+          return res.status(500).json({ error: error.message });
+        }
+        res.json({
+          message: "Upload success",
+          imageUrl: result.secure_url,
+        });
+      }
+    );
+
+    // Pipe the buffer to the upload stream
+    uploadStream.end(req.file.buffer);
+
+  } catch (err) {
+    console.error("Server error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -42,6 +78,7 @@ app.get('/', (req, res) => {
       resources: '/api/resources',
       profile: '/api/profile',
       forum: '/api/forum',
+      coachbot: '/api/coachbot',
       support: '/api/support'
     },
     documentation: 'API documentation available at /api-docs (if implemented)'
@@ -283,6 +320,21 @@ try {
   app.use('/api/forum', (req, res) => res.status(501).json({ error: 'Forum routes failed to load' }));
 }
 
+try {
+  // CoachBot routes
+  const coachBotRoutes = require('./routes/coachBotRoutes');
+  if (typeof coachBotRoutes === 'function') {
+    app.use('/api/coachbot', coachBotRoutes(asyncHandler));
+    console.log('✅ CoachBot routes loaded');
+  } else {
+    console.log('⚠️  CoachBot routes not a function, using default');
+    app.use('/api/coachbot', (req, res) => res.status(501).json({ error: 'CoachBot routes not implemented' }));
+  }
+} catch (error) {
+  console.error('❌ Failed to load CoachBot routes:', error.message);
+  app.use('/api/coachbot', (req, res) => res.status(501).json({ error: 'CoachBot routes failed to load' }));
+}
+
 // ✅ SUPPORT ROUTES - ADDED
 try {
   // Support routes
@@ -309,6 +361,7 @@ app.use(/^\/api\/.+$/, (req, res) => {
       '/api/resources',
       '/api/profile',
       '/api/forum',
+      '/api/coachbot',
       '/api/support',
       '/health',
       '/api/test',

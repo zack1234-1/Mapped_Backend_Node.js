@@ -1,5 +1,6 @@
 const express = require('express');
 const Trainee = require('../models/trainee');
+const User = require('../models/User'); // Import User model to support User updates
 
 // Helper function to capitalize the first letter and lowercase the rest (Title Case)
 const toTitleCase = (str) => {
@@ -108,7 +109,6 @@ module.exports = (asyncHandler) => {
             console.error('💥 ERROR in trainee creation:');
             console.error('Error name:', err.name);
             console.error('Error message:', err.message);
-            console.error('Error stack:', err.stack);
             
             // Handle different types of errors
             if (err.name === 'ValidationError') {
@@ -221,7 +221,7 @@ module.exports = (asyncHandler) => {
     }));
 
     // PUT /api/trainee/:id - Update trainee
-    router.put('/:id', asyncHandler(async (req, res) => {
+    router.put('/:id', asyncHandler(async (req, res, next) => {
         const traineeId = req.params.id;
         console.log('📥 PUT request for trainee ID:', traineeId);
         console.log('Update data:', req.body);
@@ -254,7 +254,7 @@ module.exports = (asyncHandler) => {
             }
             
             // Added .lean()
-            const trainee = await Trainee.findByIdAndUpdate(
+            let trainee = await Trainee.findByIdAndUpdate(
                 traineeId,
                 req.body,
                 { 
@@ -263,8 +263,32 @@ module.exports = (asyncHandler) => {
                 }
             ).select('-__v').lean();
             
+            // Fallback: If not found in Trainee, try updating User
             if (!trainee) {
-                console.log('❌ Trainee not found with ID:', traineeId);
+                console.log('⚠️ Trainee not found in Trainee collection, trying User collection for ID:', traineeId);
+                
+                // Allow user update (specifically activeDaysCount or other common fields)
+                const user = await User.findByIdAndUpdate(
+                    traineeId,
+                    req.body,
+                    { new: true, runValidators: false } // User model might strict validation if we pass belt/etc
+                ).select('-password -__v').lean();
+
+                if (user) {
+                     console.log('✅ User updated successfully via Trainee route:', user.name);
+                     return res.json({
+                        success: true,
+                        msg: 'User updated successfully',
+                        data: {
+                            ...user,
+                            id: user._id,
+                            // User might not have dateOfBirth, handle safely
+                            dateOfBirth: user.dateOfBirth ? formatDate(user.dateOfBirth) : null
+                        }
+                    });
+                }
+
+                console.log('❌ Trainee/User not found with ID:', traineeId);
                 return res.status(404).json({
                     success: false,
                     msg: 'Trainee not found'

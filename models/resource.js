@@ -49,33 +49,6 @@ const resourceSchema = new mongoose.Schema({
     required: true,
     default: 'Text'
   },
-  isPinned: {
-    type: Boolean,
-    default: false
-  },
-  isReported: {
-    type: Boolean,
-    default: false
-  },
-  reportCount: {
-    type: Number,
-    default: 0
-  },
-  reports: [{
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    reason: String,
-    reportedAt: {
-      type: Date,
-      default: Date.now
-    }
-  }],
-  viewCount: {
-    type: Number,
-    default: 0
-  }
 }, {
   collection: 'resources',  // Explicitly set collection name
   timestamps: true,
@@ -109,7 +82,6 @@ resourceSchema.virtual('timeAgo').get(function() {
 resourceSchema.index({ authorId: 1, createdAt: -1 });
 resourceSchema.index({ tags: 1 });
 resourceSchema.index({ type: 1 });  // Changed from resourceType
-resourceSchema.index({ isPinned: -1, createdAt: -1 });
 
 // Static method to get popular tags
 resourceSchema.statics.getPopularTags = async function(limit = 10) {

@@ -41,7 +41,8 @@ app.get('/', (req, res) => {
       beltProgress: '/api/belt-progress',
       resources: '/api/resources',
       profile: '/api/profile',
-      forum: '/api/forum'
+      forum: '/api/forum',
+      support: '/api/support'
     },
     documentation: 'API documentation available at /api-docs (if implemented)'
   });
@@ -151,6 +152,11 @@ app.get('/api', (req, res) => {
         path: '/api/forum',
         methods: ['GET', 'POST', 'PUT', 'DELETE'],
         description: 'Forum discussions'
+      },
+      support: {
+        path: '/api/support',
+        methods: ['GET', 'POST', 'PUT', 'DELETE'],
+        description: 'Support ticket system'
       }
     }
   });
@@ -277,6 +283,17 @@ try {
   app.use('/api/forum', (req, res) => res.status(501).json({ error: 'Forum routes failed to load' }));
 }
 
+// ✅ SUPPORT ROUTES - ADDED
+try {
+  // Support routes
+  const supportRoutes = require('./routes/supportRoutes');
+  app.use('/api/support', supportRoutes);
+  console.log('✅ Support routes loaded');
+} catch (error) {
+  console.error('❌ Failed to load support routes:', error.message);
+  app.use('/api/support', (req, res) => res.status(501).json({ error: 'Support routes failed to load' }));
+}
+
 // FIXED: 404 handler for undefined API routes - Using regex instead of wildcard
 app.use(/^\/api\/.+$/, (req, res) => {
   res.status(404).json({
@@ -292,6 +309,7 @@ app.use(/^\/api\/.+$/, (req, res) => {
       '/api/resources',
       '/api/profile',
       '/api/forum',
+      '/api/support',
       '/health',
       '/api/test',
       '/api/test-trainee'

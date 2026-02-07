@@ -231,46 +231,6 @@ router.get('/:id', async (req, res) => {
     }
 });
 
-// 6. TOGGLE PIN
-router.put('/pin/:id', async (req, res) => {
-    try {
-        const resource = await Resource.findById(req.params.id);
-        if (!resource) return res.status(404).json({ msg: 'Resource not found' });
-
-        resource.isPinned = !resource.isPinned;
-        await resource.save();
-        
-        res.json(resource);
-    } catch (err) {
-        console.error('Toggle Pin Error:', err);
-        res.status(500).json({ msg: 'Server Error', error: err.message });
-    }
-});
-
-// 7. REPORT RESOURCE
-router.post('/report/:id', async (req, res) => {
-    try {
-        const { userId, reason } = req.body;
-        if (!userId || !reason) return res.status(400).json({ msg: 'Missing userId or reason' });
-
-        const resource = await Resource.findById(req.params.id);
-        if (!resource) return res.status(404).json({ msg: 'Resource not found' });
-
-        const alreadyReported = resource.reports.some(r => r.userId.toString() === userId);
-        if (alreadyReported) return res.status(400).json({ msg: 'You have already reported this resource' });
-
-        resource.reports.push({ userId: userId, reason: reason });
-        resource.reportCount = resource.reports.length;
-        if (resource.reportCount >= 3) resource.isReported = true;
-
-        await resource.save();
-        res.json({ msg: 'Report submitted successfully', reports: resource.reports });
-    } catch (err) {
-        console.error('Report Resource Error:', err);
-        res.status(500).json({ msg: 'Server Error', error: err.message });
-    }
-});
-
 // 8. DELETE RESOURCE
 router.delete('/:id', async (req, res) => {
     try {

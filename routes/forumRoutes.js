@@ -3,21 +3,11 @@ const router = express.Router();
 const Post = require('../models/Post');
 const User = require('../models/User');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const mongoose = require('mongoose');
+const cloudinary = require('../config/cloudinary');
 
-// --- MULTER SETUP ---
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        const dir = './uploads/posts';
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        cb(null, 'uploads/posts/'); 
-    },
-    filename: (req, file, cb) => {
-        cb(null, `post-${Date.now()}${path.extname(file.originalname)}`);
-    }
-});
+// --- MULTER SETUP (Memory storage for Cloudinary) ---
+const storage = multer.memoryStorage();
 const upload = multer({ storage: storage, limits: { fileSize: 5 * 1024 * 1024 } });
 
 // 1. CREATE POST
@@ -36,9 +26,28 @@ router.post('/', upload.array('postImages', 10), async (req, res) => {
         const user = await User.findById(userId).select('-password');
         if (!user) return res.status(404).json({ msg: 'User not found' });
 
+        // Upload images to Cloudinary
         let imageUrls = [];
         if (req.files && req.files.length > 0) {
-            imageUrls = req.files.map(file => file.path.replace(/\\/g, "/"));
+            for (const file of req.files) {
+                try {
+                    const uploadResult = await new Promise((resolve, reject) => {
+                        const uploadStream = cloudinary.uploader.upload_stream(
+                            { folder: 'posts' },
+                            (error, result) => {
+                                if (error) reject(error);
+                                else resolve(result);
+                            }
+                        );
+                        uploadStream.end(file.buffer);
+                    });
+                    imageUrls.push(uploadResult.secure_url);
+                    console.log('✅ Image uploaded to Cloudinary:', uploadResult.secure_url);
+                } catch (cloudinaryError) {
+                    console.error('❌ Cloudinary upload error:', cloudinaryError);
+                    return res.status(500).json({ msg: 'Image upload failed', error: cloudinaryError.message });
+                }
+            }
         }
 
         let tags = [];
@@ -60,7 +69,7 @@ router.post('/', upload.array('postImages', 10), async (req, res) => {
         const post = await newPost.save();
         res.json(post);
     } catch (err) {
-        console.error('Create Post Error:', err);
+        console.error('❌ Create Post Error:', err);
         res.status(500).json({ msg: 'Server Error', error: err.message });
     }
 });
@@ -251,20 +260,28 @@ router.delete('/:id', async (req, res) => {
             return res.status(401).json({ msg: 'User not authorized to delete this post' });
         }
 
-        // Delete associated files
+        // Delete associated images from Cloudinary
         if (post.images && post.images.length > 0) {
-            post.images.forEach(imagePath => {
-                if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
-            });
-        }
-        if (post.image && fs.existsSync(post.image)) {
-            fs.unlinkSync(post.image);
+            for (const imageUrl of post.images) {
+                try {
+                    // Extract public_id from Cloudinary URL
+                    const urlParts = imageUrl.split('/');
+                    const fileName = urlParts[urlParts.length - 1];
+                    const publicId = `posts/${fileName.split('.')[0]}`;
+                    
+                    await cloudinary.uploader.destroy(publicId);
+                    console.log('✅ Image deleted from Cloudinary:', publicId);
+                } catch (cloudinaryError) {
+                    console.error('⚠️  Error deleting image from Cloudinary:', cloudinaryError);
+                    // Continue with deletion even if Cloudinary delete fails
+                }
+            }
         }
 
         await Post.findByIdAndDelete(req.params.id);
         res.json({ msg: 'Post deleted successfully' });
     } catch (err) {
-        console.error('Delete Post Error:', err);
+        console.error('❌ Delete Post Error:', err);
         res.status(500).json({ msg: 'Server Error', error: err.message });
     }
 });

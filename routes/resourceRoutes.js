@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Resource = require('../models/resource');
 const User = require('../models/User'); 
+const BeltProgress = require('../models/beltProgress'); // Import BeltProgress
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -263,6 +264,77 @@ router.delete('/:id', async (req, res) => {
         res.json({ msg: 'Resource deleted successfully' });
     } catch (err) {
         console.error('Delete Resource Error:', err);
+        res.status(500).json({ msg: 'Server Error', error: err.message });
+    }
+});
+
+router.post('/:id/view', async (req, res) => {
+    try {
+        const { userId } = req.body;
+        const resourceId = req.params.id;
+
+        if (!userId) return res.status(400).json({ msg: 'Missing userId' });
+        if (!mongoose.Types.ObjectId.isValid(resourceId)) {
+            return res.status(400).json({ msg: 'Invalid resource ID' });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) return res.status(404).json({ msg: 'User not found' });
+
+        // Initialize viewedResources array if not exists
+        if (!user.viewedResources) {
+            user.viewedResources = [];
+        }
+
+        // Add to viewed resources if not already viewed
+        if (!user.viewedResources.includes(resourceId)) {
+            user.viewedResources.push(resourceId);
+            await user.save();
+        }
+
+        // --- UPDATE BELT PROGRESS (White Belt: openResourceCount) ---
+        // Increment the count for White Belt specifically because it's the only one with this metric.
+        // Cap at 3.
+        const progressDoc = await BeltProgress.findOne({ userId: userId });
+        const currentCount = progressDoc?.belts?.W?.openResourceCount || 0;
+
+        if (currentCount < 3) {
+            await BeltProgress.findOneAndUpdate(
+                { userId: userId },
+                { $inc: { 'belts.W.openResourceCount': 1 } },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+        }
+
+        res.json({ 
+            success: true, 
+            msg: 'Resource view recorded and progress updated',
+            viewedCount: user.viewedResources.length 
+        });
+    } catch (err) {
+        console.error('Record Resource View Error:', err);
+        res.status(500).json({ msg: 'Server Error', error: err.message });
+    }
+});
+
+// 7. GET USER'S VIEWED RESOURCES (For progress tracking)
+router.get('/user/:userId/viewed', async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(400).json({ msg: 'Invalid user ID' });
+        }
+
+        const user = await User.findById(userId).select('viewedResources');
+        if (!user) return res.status(404).json({ msg: 'User not found' });
+
+        res.json({ 
+            success: true, 
+            data: user.viewedResources || [] 
+        });
+    } catch (err) {
+        console.error('Get Viewed Resources Error:', err);
         res.status(500).json({ msg: 'Server Error', error: err.message });
     }
 });

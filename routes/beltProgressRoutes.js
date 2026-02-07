@@ -64,7 +64,10 @@ module.exports = (asyncHandler) => {
        if (openResourceCount !== undefined) {
    
     const currentVal = currentData.openResourceCount || 0;
-    const incomingVal = Number(openResourceCount);
+    let incomingVal = Number(openResourceCount);
+    
+    // Cap at 3
+    if (incomingVal > 3) incomingVal = 3;
 
     if (incomingVal > currentVal) {
         updateData[`belts.${code}.openResourceCount`] = incomingVal;
@@ -207,7 +210,6 @@ module.exports = (asyncHandler) => {
 
         const validFields = {
             'recommendation': 'recommendationCount',
-            'photo': 'sessionPhotoCount',
             'post': 'postCount',
             'description': 'writeShortDescriptionCount',
             'share_tip': 'shareTipCount',
@@ -224,13 +226,76 @@ module.exports = (asyncHandler) => {
 
         const updatePath = `belts.${code}.${fieldToUpdate}`;
         
-        await BeltProgress.updateOne(
-            { userId },
-            { $inc: { [updatePath]: 1 } }
-        );
+        // Cap openResourceCount at 3
+        if (fieldToUpdate === 'openResourceCount') {
+            const currentDoc = await BeltProgress.findOne({ userId });
+            const currentCount = currentDoc?.belts?.[code]?.openResourceCount || 0;
+            
+            if (currentCount < 3) {
+                 await BeltProgress.updateOne(
+                    { userId },
+                    { $inc: { [updatePath]: 1 } }
+                );
+            }
+        } else {
+             await BeltProgress.updateOne(
+                { userId },
+                { $inc: { [updatePath]: 1 } }
+            );
+        }
 
         res.json({ success: true, msg: `Updated ${fieldToUpdate} for ${code}` });
     }));
+
+
+router.post('/:id/view', async (req, res) => {
+    try {
+        const { userId } = req.body;
+        const resourceId = req.params.id;
+
+        if (!userId) return res.status(400).json({ msg: 'Missing userId' });
+        if (!mongoose.Types.ObjectId.isValid(resourceId)) {
+            return res.status(400).json({ msg: 'Invalid resource ID' });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) return res.status(404).json({ msg: 'User not found' });
+
+        // Initialize viewedResources array if not exists
+        if (!user.viewedResources) {
+            user.viewedResources = [];
+        }
+
+        // Add to viewed resources if not already viewed
+        if (!user.viewedResources.includes(resourceId)) {
+            user.viewedResources.push(resourceId);
+            await user.save();
+
+            // 🔥 UPDATE BELT PROGRESS - Sync the count to White Belt
+            await BeltProgress.findOneAndUpdate(
+                { userId: userId },
+                { 
+                    $set: { 
+                        'belts.W.openResourceCount': user.viewedResources.length 
+                    } 
+                },
+                { upsert: true, new: true }
+            );
+
+            console.log(`✅ Resource view recorded: ${resourceId}, Total: ${user.viewedResources.length}`);
+        }
+
+        res.json({ 
+            success: true, 
+            msg: 'Resource view recorded',
+            viewedCount: user.viewedResources.length 
+        });
+    } catch (err) {
+        console.error('Record Resource View Error:', err);
+        res.status(500).json({ msg: 'Server Error', error: err.message });
+    }
+});
+    
 
     return router;
 };

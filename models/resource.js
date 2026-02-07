@@ -1,66 +1,101 @@
 const mongoose = require('mongoose');
-const Schema = mongoose.Schema;
 
-const ResourceSchema = new Schema({
-     author: {
-        type: String,
-        default: 'Lieyza Wahab', 
-        trim: true
-    },
-
-    type: {
-        type: String,
-        required: [true, 'Resource type is required'],
-        trim: true,
-        enum: {
-            values: ['Image', 'Video', 'Link', 'Text'],
-            message: '{VALUE} is not a valid resource type'
-        }
-    },
-
-    title: {
-        type: String,
-        required: [true, 'Title/Caption is required'],
-        trim: true,
-        maxlength: [300, 'Caption cannot exceed 300 characters']
-    },
-
-    description: {
-        type: String,
-        trim: true,
-        default: '' 
-    },
-
-
-    tags: {
-        type: [String], 
-        default: []
-    },
-    
-    imageUrls: {
-        type: [String], 
-        default: [] 
-    },
-    
-    videoUrls: {
-        type: [String], 
-        default: [] 
-    },
-
-    linkUrl: {
-        type: String,
-        trim: true,
-        default: ''
-    },
-   
+const resourceSchema = new mongoose.Schema({
+  title: {
+    type: String,
+    required: [true, 'Title is required'],
+    trim: true,
+    maxlength: [200, 'Title cannot exceed 200 characters']
+  },
+  description: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  authorId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  author: {
+    type: String,
+    default: ''
+  },
+  authorName: {
+    type: String,
+    default: ''
+  },
+  authorImage: {
+    type: String,
+    default: null
+  },
+  imageUrls: [{
+    type: String
+  }],
+  videoUrls: [{
+    type: String
+  }],
+  linkUrl: {
+    type: String,
+    default: ''
+  },
+  tags: [{
+    type: String,
+    trim: true,
+    lowercase: true
+  }],
+  type: {  // Changed from 'resourceType'
+    type: String,
+    enum: ['Image', 'Video', 'Link', 'Text'],  // Capital first letters
+    required: true,
+    default: 'Text'
+  },
 }, {
-    timestamps: true 
+  collection: 'resources',  // Explicitly set collection name
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
 });
 
-// Indexes for sorting and filtering
-ResourceSchema.index({ type: 1 });
-ResourceSchema.index({ createdAt: -1 });
+// Virtual for timeAgo
+resourceSchema.virtual('timeAgo').get(function() {
+  const now = new Date();
+  const diff = now - this.createdAt;
+  
+  const seconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  const weeks = Math.floor(days / 7);
+  const months = Math.floor(days / 30);
+  const years = Math.floor(days / 365);
 
-ResourceSchema.index({ title: 'text', description: 'text', tags: 'text' });
+  if (years > 0) return `${years}y ago`;
+  if (months > 0) return `${months}mo ago`;
+  if (weeks > 0) return `${weeks}w ago`;
+  if (days > 0) return `${days}d ago`;
+  if (hours > 0) return `${hours}h ago`;
+  if (minutes > 0) return `${minutes}m ago`;
+  return 'Just now';
+});
 
-module.exports = mongoose.model('Resource', ResourceSchema);
+// Index for faster queries
+resourceSchema.index({ authorId: 1, createdAt: -1 });
+resourceSchema.index({ tags: 1 });
+resourceSchema.index({ type: 1 });  // Changed from resourceType
+
+// Static method to get popular tags
+resourceSchema.statics.getPopularTags = async function(limit = 10) {
+  const result = await this.aggregate([
+    { $unwind: '$tags' },
+    { $group: { _id: '$tags', count: { $sum: 1 } } },
+    { $sort: { count: -1 } },
+    { $limit: limit },
+    { $project: { tag: '$_id', count: 1, _id: 0 } }
+  ]);
+  
+  return result.map(r => r.tag);
+};
+
+const Resource = mongoose.model('Resource', resourceSchema);
+
+module.exports = Resource;

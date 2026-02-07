@@ -8,21 +8,19 @@ const fs = require('fs');
 // 1. CONFIGURE STORAGE
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        const dir = './uploads';
+        const dir = './uploads/users';
         if (!fs.existsSync(dir)){
-            fs.mkdirSync(dir);
+            fs.mkdirSync(dir, { recursive: true });
         }
         cb(null, 'uploads/users/');
     },
     filename: (req, file, cb) => {
-        // Rename: "user-ID-Timestamp.ext"
-        cb(null, `user-${req.params.id}-${Date.now()}${path.extname(file.originalname)}`);
+        cb(null, `user-${Date.now()}${path.extname(file.originalname)}`);
     }
 });
 
-// 2. UPDATED FILE FILTER (Now with Debugging!)
+// 2. FILE FILTER
 const fileFilter = (req, file, cb) => {
-    // DEBUG: Print the incoming file type to your VS Code Terminal
     console.log(`[Multer] Uploading file: ${file.originalname}`);
     console.log(`[Multer] Detected MimeType: ${file.mimetype}`);
 
@@ -30,26 +28,25 @@ const fileFilter = (req, file, cb) => {
         'image/jpeg', 
         'image/jpg', 
         'image/png', 
-        'image/webp',   // Added support for WebP (common on Web)
-        'image/heic',   // Added support for HEIC (common on iPhone)
-        'application/octet-stream' // Sometimes Flutter sends this for generic binaries
+        'image/webp',
+        'image/heic',
+        'application/octet-stream'
     ];
 
     if (allowedTypes.includes(file.mimetype)) {
         cb(null, true);
     } else {
-        // Rejecting
         cb(new Error(`Invalid file type: ${file.mimetype}. Only JPG, PNG, and WebP are allowed.`), false);
     }
 };
 
 const upload = multer({ 
     storage: storage,
-    limits: { fileSize: 1024 * 1024 * 10 }, // Increased limit to 10MB
+    limits: { fileSize: 1024 * 1024 * 10 }, // 10MB
     fileFilter: fileFilter
 });
 
-// GET PROFILE - Updated to handle both _id and googleId
+// GET PROFILE - Handle both _id and googleId
 router.get('/:id', async (req, res) => {
     try {
         let user;
@@ -87,54 +84,114 @@ router.get('/:id', async (req, res) => {
     }
 });
 
-// UPDATE PROFILE
-router.put('/:id', async (req, res) => {
-    const { name, username, phone, country, gender, address } = req.body;
-    const profileFields = {};
-    if (name) profileFields.name = name;
-    if (username) profileFields.username = username;
-    if (phone) profileFields.phone = phone;
-    if (country) profileFields.country = country;
-    if (gender) profileFields.gender = gender;
-    if (address) profileFields.address = address;
-
+// UPDATE PROFILE - NOW INCLUDES IMAGE UPLOAD
+router.put('/:id', upload.single('avatar'), async (req, res) => {
     try {
-        let user = await User.findByIdAndUpdate(
-            req.params.id, 
-            { $set: profileFields },
-            { new: true } 
-        ).select('-password');
-        res.json(user);
+        const { name, username, phone, country, gender, address } = req.body;
+        
+        console.log('=== Profile Update Request ===');
+        console.log('User ID:', req.params.id);
+        console.log('Body:', req.body);
+        console.log('File:', req.file);
+        
+        let user = await User.findById(req.params.id);
+        if (!user) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'User not found' 
+            });
+        }
+
+        if (name) user.name = name;
+        if (username) user.username = username;
+        if (phone) user.phone = phone;
+        if (country) user.country = country;
+        if (gender) user.gender = gender;
+        if (address) user.address = address;
+
+        // Update avatar if uploaded
+        if (req.file) {
+            // Delete old avatar if exists
+            if (user.avatar && fs.existsSync(user.avatar)) {
+                try {
+                    fs.unlinkSync(user.avatar);
+                    console.log('✓ Old avatar deleted:', user.avatar);
+                } catch (unlinkErr) {
+                    console.error('✗ Error deleting old avatar:', unlinkErr);
+                }
+            }
+            user.avatar = req.file.path.replace(/\\/g, "/");
+            console.log('✓ New avatar saved:', user.avatar);
+        }
+
+        await user.save();
+        
+        // Return user without password
+        const updatedUser = await User.findById(req.params.id).select('-password');
+        
+        console.log('✓ Profile updated successfully');
+        
+        res.json({
+            success: true,
+            message: 'Profile updated successfully',
+            data: updatedUser
+        });
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server Error');
+        console.error('✗ Update profile error:', err.message);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Server Error: ' + err.message 
+        });
     }
 });
 
-// UPLOAD PICTURE (Use /picture to match your previous setup)
+// LEGACY ENDPOINT - Keep for backward compatibility
+// UPLOAD PICTURE (Separate endpoint if needed)
 router.put('/picture/:id', upload.single('profileImage'), async (req, res) => {
     try {
         if (!req.file) {
-            return res.status(400).json({ msg: 'No file uploaded' });
+            return res.status(400).json({ 
+                success: false,
+                msg: 'No file uploaded' 
+            });
         }
 
-        const avatarUrl = req.file.path.replace(/\\/g, "/"); 
+        const user = await User.findById(req.params.id);
+        if (!user) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'User not found' 
+            });
+        }
 
-        const user = await User.findByIdAndUpdate(
-            req.params.id,
-            { avatar: avatarUrl },
-            { new: true }
-        ).select('-password');
+        // Delete old avatar
+        if (user.avatar && fs.existsSync(user.avatar)) {
+            try {
+                fs.unlinkSync(user.avatar);
+            } catch (unlinkErr) {
+                console.error('Error deleting old avatar:', unlinkErr);
+            }
+        }
+
+        const avatarUrl = req.file.path.replace(/\\/g, "/");
+        user.avatar = avatarUrl;
+        await user.save();
+
+        const updatedUser = await User.findById(req.params.id).select('-password');
 
         res.json({ 
+            success: true,
             msg: 'Photo updated successfully', 
-            avatar: user.avatar,
-            user: user 
+            avatar: updatedUser.avatar,
+            user: updatedUser 
         });
 
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send(err.message);
+        console.error('Upload picture error:', err.message);
+        res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 });
 

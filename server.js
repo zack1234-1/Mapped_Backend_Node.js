@@ -39,9 +39,10 @@ app.get('/', (req, res) => {
       session: '/api/session',
       progress: '/api/progress',
       beltProgress: '/api/belt-progress',
-      resource: '/api/resource',
+      resources: '/api/resources',
       profile: '/api/profile',
-      forum: '/api/forum'
+      forum: '/api/forum',
+      support: '/api/support'
     },
     documentation: 'API documentation available at /api-docs (if implemented)'
   });
@@ -137,8 +138,8 @@ app.get('/api', (req, res) => {
         methods: ['GET', 'POST', 'PUT'],
         description: 'Belt progress tracking'
       },
-      resource: {
-        path: '/api/resource',
+      resources: {
+        path: '/api/resources',
         methods: ['GET', 'POST', 'DELETE'],
         description: 'Resource management'
       },
@@ -151,6 +152,11 @@ app.get('/api', (req, res) => {
         path: '/api/forum',
         methods: ['GET', 'POST', 'PUT', 'DELETE'],
         description: 'Forum discussions'
+      },
+      support: {
+        path: '/api/support',
+        methods: ['GET', 'POST', 'PUT', 'DELETE'],
+        description: 'Support ticket system'
       }
     }
   });
@@ -235,16 +241,16 @@ try {
 try {
   // Resource routes
   const resourceRoutes = require('./routes/resourceRoutes');
-  if (typeof resourceRoutes === 'function') {
-    app.use('/api/resource', resourceRoutes(asyncHandler));
-    console.log('✅ Resource routes loaded');
+
+  if (typeof resourceRoutes === 'function' && !resourceRoutes.stack) {
+      app.use('/api/resources', resourceRoutes(asyncHandler));
   } else {
-    console.log('⚠️  Resource routes not a function, using default');
-    app.use('/api/resource', (req, res) => res.status(501).json({ error: 'Resource routes not implemented' }));
+      app.use('/api/resources', resourceRoutes);
   }
+  console.log('✅ Resource routes loaded');
 } catch (error) {
   console.error('❌ Failed to load resource routes:', error.message);
-  app.use('/api/resource', (req, res) => res.status(501).json({ error: 'Resource routes failed to load' }));
+  app.use('/api/resources', (req, res) => res.status(501).json({ error: 'Resource routes failed to load' }));
 }
 
 try {
@@ -277,6 +283,17 @@ try {
   app.use('/api/forum', (req, res) => res.status(501).json({ error: 'Forum routes failed to load' }));
 }
 
+// ✅ SUPPORT ROUTES - ADDED
+try {
+  // Support routes
+  const supportRoutes = require('./routes/supportRoutes');
+  app.use('/api/support', supportRoutes);
+  console.log('✅ Support routes loaded');
+} catch (error) {
+  console.error('❌ Failed to load support routes:', error.message);
+  app.use('/api/support', (req, res) => res.status(501).json({ error: 'Support routes failed to load' }));
+}
+
 // FIXED: 404 handler for undefined API routes - Using regex instead of wildcard
 app.use(/^\/api\/.+$/, (req, res) => {
   res.status(404).json({
@@ -289,9 +306,10 @@ app.use(/^\/api\/.+$/, (req, res) => {
       '/api/session',
       '/api/progress',
       '/api/belt-progress',
-      '/api/resource',
+      '/api/resources',
       '/api/profile',
       '/api/forum',
+      '/api/support',
       '/health',
       '/api/test',
       '/api/test-trainee'

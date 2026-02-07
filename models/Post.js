@@ -4,33 +4,56 @@ const Schema = mongoose.Schema;
 const PostSchema = new Schema({
   user: {
     type: Schema.Types.ObjectId,
-    ref: 'User' // Connects to your User model
+    ref: 'User'
   },
   text: {
     type: String,
     required: true
   },
+  name: {
+    type: String
+  },
+  avatar: {
+    type: String
+  },
+  // Single image
   image: {
-    type: String // Optional URL for post image
+    type: String,
+    default: ''
   },
-  images: [
-    { type: String }
-  ],
-  videoUrl: { 
-    type: String 
-  },  
-  videoThumbnail: { 
-    type: String 
+  // Multiple images
+  images: {
+    type: [String],
+    default: []
   },
-  tags: [String], // Array of tags like ["#Taekwondo", "#Training"]
+  // Video fields
+  videoUrl: {
+    type: String,
+    default: ''
+  },
+  videoThumbnail: {
+    type: String,
+    default: ''
+  },
+  // Tags/Hashtags
+  tags: {
+    type: [String],
+    default: []
+  },
+  // Likes
   likes: [
     {
       user: {
         type: Schema.Types.ObjectId,
         ref: 'User'
+      },
+      date: {
+        type: Date,
+        default: Date.now
       }
     }
   ],
+  // Comments
   comments: [
     {
       user: {
@@ -41,14 +64,40 @@ const PostSchema = new Schema({
         type: String,
         required: true
       },
-      name: String,
-      avatar: String,
+      name: {
+        type: String
+      },
+      avatar: {
+        type: String
+      },
       date: {
         type: Date,
         default: Date.now
       }
     }
   ],
+  // Reports
+  reports: [
+    {
+      user: {
+        type: Schema.Types.ObjectId,
+        ref: 'User'
+      },
+      reason: {
+        type: String,
+        required: true
+      },
+      date: {
+        type: Date,
+        default: Date.now
+      }
+    }
+  ],
+  // Pin status
+  isPinned: {
+    type: Boolean,
+    default: false
+  },
   date: {
     type: Date,
     default: Date.now

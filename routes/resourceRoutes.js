@@ -10,7 +10,17 @@ const cloudinary = require('../config/cloudinary');
 const storage = multer.memoryStorage();
 const upload = multer({ 
     storage: storage, 
-    limits: { fileSize: 10 * 1024 * 1024 } 
+    limits: { 
+        fileSize: 1 * 1024 * 1024, // 1MB per file
+        files: 4 // Maximum 4 files
+    },
+    fileFilter: (req, file, cb) => {
+        // Check file size
+        if (file.size > 1 * 1024 * 1024) {
+            return cb(new Error('File size exceeds 1MB limit'));
+        }
+        cb(null, true);
+    }
 });
 
 // --- HELPER FUNCTION: TRANSFORM RESOURCE ---
@@ -69,6 +79,11 @@ router.post('/', upload.any(), async (req, res) => {
 
         const user = await User.findById(userId).select('name avatar username');
         if (!user) return res.status(404).json({ msg: 'User not found' });
+
+        // Check if too many files
+        if (req.files && req.files.length > 4) {
+            return res.status(400).json({ msg: 'Maximum 4 images allowed per resource' });
+        }
 
         // Upload images to Cloudinary
         let imageUrls = [];

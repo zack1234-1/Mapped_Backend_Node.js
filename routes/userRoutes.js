@@ -3,6 +3,27 @@ module.exports = (asyncHandler) => {
     const router = express.Router();
     const User = require('../models/User');
     const jwt = require('jsonwebtoken');
+    const nodemailer = require('nodemailer');
+
+    // --- EMAIL HELPER UTILITY ---
+    const sendEmail = async (options) => {
+        const transporter = nodemailer.createTransport({
+            service: 'Gmail', // Or your preferred service
+            auth: {
+                user: process.env.EMAIL_USER,
+                pass: process.env.EMAIL_PASS, // Use App Password for Gmail
+            },
+        });
+
+        const mailOptions = {
+            from: `"Mapped Support" <${process.env.EMAIL_USER}>`,
+            to: options.email,
+            subject: options.subject,
+            html: options.html,
+        };
+
+        await transporter.sendMail(mailOptions);
+    };
 
     // 1. REGISTER (Email/Password) - Only store name, email, password
     router.post('/register', asyncHandler(async (req, res, next) => {
@@ -233,6 +254,86 @@ module.exports = (asyncHandler) => {
                 error: error.message
             });
         }
+    }));
+
+    // 5. FORGOT PASSWORD
+    router.post('/forgot-password', asyncHandler(async (req, res) => {
+        const { email } = req.body;
+        if (!email) return res.status(400).json({ success: false, msg: 'Email is required' });
+
+        // Removed .toLowerCase() - Ensure your database search matches the stored format
+        const user = await User.findOne({ email: email });
+        if (!user) return res.status(404).json({ success: false, msg: 'User not found' });
+
+        // Generate a 4-digit numeric OTP
+        const otp = Math.floor(1000 + Math.random() * 9000).toString();
+
+        user.resetPasswordToken = otp;
+        user.resetPasswordExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+        await user.save();
+
+        try {
+            await sendEmail({
+                email: user.email,
+                subject: 'Your Password Reset Code',
+                html: `
+                    <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 10px; max-width: 500px;">
+                        <h2 style="color: #333;">Password Reset Request</h2>
+                        <p>Use the following 4-digit code to reset your password. Valid for 10 minutes.</p>
+                        <div style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #4CAF50; text-align: center; padding: 20px; background: #f9f9f9;">
+                            ${otp}
+                        </div>
+                    </div>
+                `
+            });
+            res.json({ success: true, msg: 'Code sent to email' });
+        } catch (error) {
+            user.resetPasswordToken = undefined;
+            user.resetPasswordExpires = undefined;
+            await user.save();
+            res.status(500).json({ success: false, msg: 'Email could not be sent' });
+        }
+    }));
+
+    // 6. VERIFY OTP
+    router.post('/verify-otp', asyncHandler(async (req, res) => {
+        let { email, otp } = req.body;
+
+        // FIX: Extract email if it was sent as an object from Flutter
+        const emailString = typeof email === 'object' ? email.email : email;
+
+        const user = await User.findOne({
+            email: emailString,
+            resetPasswordToken: otp,
+            resetPasswordExpires: { $gt: Date.now() }
+        });
+
+        if (!user) return res.status(400).json({ success: false, msg: 'Invalid or expired code' });
+
+        res.json({ success: true, msg: 'Code verified successfully' });
+    }));
+
+    // 7. RESET PASSWORD
+    router.post('/reset-password', asyncHandler(async (req, res) => {
+        let { email, otp, newPassword } = req.body;
+
+        // FIX: Extract email if it was sent as an object from Flutter
+        const emailString = typeof email === 'object' ? email.email : email;
+
+        const user = await User.findOne({
+            email: emailString,
+            resetPasswordToken: otp,
+            resetPasswordExpires: { $gt: Date.now() }
+        });
+
+        if (!user) return res.status(400).json({ success: false, msg: 'Session expired or invalid code' });
+
+        user.password = newPassword; 
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpires = undefined;
+        await user.save();
+
+        res.json({ success: true, msg: 'Password reset successful' });
     }));
 
     return router;

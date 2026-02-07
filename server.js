@@ -16,8 +16,8 @@ const asyncHandler = fn => (req, res, next) => {
 app.get('/health', (req, res) => {
   const mongoState = mongoose.connection.readyState;
   const mongoStatus = mongoState === 1 ? 'connected' : 
-                     mongoState === 2 ? 'connecting' :
-                     mongoState === 3 ? 'disconnecting' : 'disconnected';
+                      mongoState === 2 ? 'connecting' :
+                      mongoState === 3 ? 'disconnecting' : 'disconnected';
   
   res.status(200).json({ 
     status: 'OK', 
@@ -41,7 +41,8 @@ app.get('/', (req, res) => {
       beltProgress: '/api/belt-progress',
       resource: '/api/resource',
       profile: '/api/profile',
-      forum: '/api/forum'
+      forum: '/api/forum',
+      admin: '/api/admin'
     },
     documentation: 'API documentation available at /api-docs (if implemented)'
   });
@@ -151,6 +152,11 @@ app.get('/api', (req, res) => {
         path: '/api/forum',
         methods: ['GET', 'POST', 'PUT', 'DELETE'],
         description: 'Forum discussions'
+      },
+      admin: {
+        path: '/api/admin',
+        methods: ['GET', 'DELETE', 'PATCH'],
+        description: 'Admin management for reports and users'
       }
     }
   });
@@ -277,6 +283,21 @@ try {
   app.use('/api/forum', (req, res) => res.status(501).json({ error: 'Forum routes failed to load' }));
 }
 
+try {
+  // Admin Management routes
+  const adminRoutes = require('./routes/adminRoutes');
+  if (typeof adminRoutes === 'function') {
+    app.use('/api/admin', adminRoutes(asyncHandler));
+    console.log('✅ Admin Management routes loaded');
+  } else {
+    console.log('⚠️  Admin routes not a function, using default');
+    app.use('/api/admin', (req, res) => res.status(501).json({ error: 'Admin routes not implemented' }));
+  }
+} catch (error) {
+  console.error('❌ Failed to load admin routes:', error.message);
+  app.use('/api/admin', (req, res) => res.status(501).json({ error: 'Admin routes failed to load' }));
+}
+
 // FIXED: 404 handler for undefined API routes - Using regex instead of wildcard
 app.use(/^\/api\/.+$/, (req, res) => {
   res.status(404).json({
@@ -292,6 +313,7 @@ app.use(/^\/api\/.+$/, (req, res) => {
       '/api/resource',
       '/api/profile',
       '/api/forum',
+      '/api/admin',
       '/health',
       '/api/test',
       '/api/test-trainee'

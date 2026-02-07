@@ -3,22 +3,11 @@ const router = express.Router();
 const Resource = require('../models/resource');
 const User = require('../models/User'); 
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const mongoose = require('mongoose');
+const cloudinary = require('../config/cloudinary');
 
-// --- MULTER SETUP ---
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        const dir = './uploads/resources';
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        cb(null, 'uploads/resources/');
-    },
-    filename: (req, file, cb) => {
-        cb(null, `resource-${Date.now()}${path.extname(file.originalname)}`);
-    }
-});
-
+// --- MULTER SETUP (Memory storage for Cloudinary) ---
+const storage = multer.memoryStorage();
 const upload = multer({ 
     storage: storage, 
     limits: { fileSize: 10 * 1024 * 1024 } 
@@ -81,9 +70,28 @@ router.post('/', upload.any(), async (req, res) => {
         const user = await User.findById(userId).select('name avatar username');
         if (!user) return res.status(404).json({ msg: 'User not found' });
 
+        // Upload images to Cloudinary
         let imageUrls = [];
         if (req.files && req.files.length > 0) {
-            imageUrls = req.files.map(file => file.path.replace(/\\/g, "/"));
+            for (const file of req.files) {
+                try {
+                    const uploadResult = await new Promise((resolve, reject) => {
+                        const uploadStream = cloudinary.uploader.upload_stream(
+                            { folder: 'resources' },
+                            (error, result) => {
+                                if (error) reject(error);
+                                else resolve(result);
+                            }
+                        );
+                        uploadStream.end(file.buffer);
+                    });
+                    imageUrls.push(uploadResult.secure_url);
+                    console.log('✅ Image uploaded to Cloudinary:', uploadResult.secure_url);
+                } catch (cloudinaryError) {
+                    console.error('❌ Cloudinary upload error:', cloudinaryError);
+                    return res.status(500).json({ msg: 'Image upload failed', error: cloudinaryError.message });
+                }
+            }
         }
 
         let videoUrls = [];

@@ -39,7 +39,7 @@ app.get('/', (req, res) => {
       session: '/api/session',
       progress: '/api/progress',
       beltProgress: '/api/belt-progress',
-      resource: '/api/resource',
+      resources: '/api/resources',
       profile: '/api/profile',
       forum: '/api/forum'
     },
@@ -137,8 +137,8 @@ app.get('/api', (req, res) => {
         methods: ['GET', 'POST', 'PUT'],
         description: 'Belt progress tracking'
       },
-      resource: {
-        path: '/api/resource',
+      resources: {
+        path: '/api/resources',
         methods: ['GET', 'POST', 'DELETE'],
         description: 'Resource management'
       },
@@ -235,16 +235,16 @@ try {
 try {
   // Resource routes
   const resourceRoutes = require('./routes/resourceRoutes');
-  if (typeof resourceRoutes === 'function') {
-    app.use('/api/resource', resourceRoutes(asyncHandler));
-    console.log('✅ Resource routes loaded');
+
+  if (typeof resourceRoutes === 'function' && !resourceRoutes.stack) {
+      app.use('/api/resources', resourceRoutes(asyncHandler));
   } else {
-    console.log('⚠️  Resource routes not a function, using default');
-    app.use('/api/resource', (req, res) => res.status(501).json({ error: 'Resource routes not implemented' }));
+      app.use('/api/resources', resourceRoutes);
   }
+  console.log('✅ Resource routes loaded');
 } catch (error) {
   console.error('❌ Failed to load resource routes:', error.message);
-  app.use('/api/resource', (req, res) => res.status(501).json({ error: 'Resource routes failed to load' }));
+  app.use('/api/resources', (req, res) => res.status(501).json({ error: 'Resource routes failed to load' }));
 }
 
 try {
@@ -289,7 +289,7 @@ app.use(/^\/api\/.+$/, (req, res) => {
       '/api/session',
       '/api/progress',
       '/api/belt-progress',
-      '/api/resource',
+      '/api/resources',
       '/api/profile',
       '/api/forum',
       '/health',

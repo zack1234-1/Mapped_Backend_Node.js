@@ -1,20 +1,17 @@
 const express = require('express');
 const BeltProgress = require('../models/beltProgress');
 const Session = require('../models/session');
-const User = require('../models/User'); // Corrected from 'trainee' to 'User'
+const User = require('../models/User');
 
-// --- 1. CONSTANTS (MATCHING FRONTEND) ---
 const BELT_SESSION_REQ = { 'W': 3, 'Y': 5, 'G': 8, 'B': 20, 'R': 20, 'L': 9999 };
 const BELT_ACTIVE_DAY_REQ = { 'W': 3, 'Y': 5, 'G': 14, 'B': 30, 'R': 60, 'L': 9999 };
 
 const BELT_ORDER = ['W', 'Y', 'G', 'B', 'R', 'L'];
 
-// Helper to map Full Names to Codes
 const getBeltCode = (input) => {
     if (!input) return null;
     const normalized = input.trim();
     const map = { 'White': 'W', 'Yellow': 'Y', 'Green': 'G', 'Blue': 'B', 'Brown': 'R', 'Black': 'L' };
-    // Also support direct codes if passed
     if (Object.values(map).includes(normalized)) return normalized;
     if (map[normalized]) return map[normalized];
     
@@ -22,7 +19,6 @@ const getBeltCode = (input) => {
     return map[normalized] || normalized; 
 };
 
-// Helper: Distribute Totals
 const distributeCountToBelts = (totalCount, requirements) => {
     let remaining = totalCount;
     const distribution = {};
@@ -66,12 +62,10 @@ module.exports = (asyncHandler) => {
         }
 
        if (openResourceCount !== undefined) {
-    // 1. Get current value from DB (Default to 0)
+   
     const currentVal = currentData.openResourceCount || 0;
     const incomingVal = Number(openResourceCount);
 
-    // 2. SAFETY LOCK: Only save if the new value is HIGHER.
-    // This prevents the "Login Reset" bug where the app sends 0.
     if (incomingVal > currentVal) {
         updateData[`belts.${code}.openResourceCount`] = incomingVal;
         console.log(`[Sync] Updating openResourceCount to ${incomingVal}`);
@@ -81,7 +75,7 @@ module.exports = (asyncHandler) => {
 }
 
         if (progressPercentage !== undefined) {
-            const roundedProgress = parseFloat(Number(progressPercentage).toFixed(2));
+            const roundedProgress = Math.round(Number(progressPercentage));
             updateData[`belts.${code}.progressPercentage`] = roundedProgress;
             
             if (roundedProgress >= 100) {
@@ -152,7 +146,6 @@ module.exports = (asyncHandler) => {
             }
             const docData = savedBeltData || {};
             
-            // Base fields common to all belts
             const beltResponse = {
                 planSessionCount: distSessions[code],
                 activeDayCount: docData.activeDayCount || 0,
@@ -163,17 +156,14 @@ module.exports = (asyncHandler) => {
             };
 
             if (code === 'W') {
-    // Force accessing the property safely
     const count = (docData && docData.openResourceCount !== undefined) 
         ? docData.openResourceCount 
         : 0;
     
     beltResponse.openResourceCount = count;
     
-    // Add this log to verify what the backend is actually sending
     console.log(`[GetBeltProgress] Sending White Belt openResourceCount: ${count}`); 
 }
-            // -----------------------------------------------------
 
             const exclude = ['planSessionCount', 'activeDayCount', 'isCompleted', '_id', 'id']; 
             Object.keys(docData).forEach(key => {

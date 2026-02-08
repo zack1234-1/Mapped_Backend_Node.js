@@ -75,6 +75,11 @@ const UserSchema = new Schema({
         type: Date,
         default: null
     },
+
+    isBlocked: {
+        type: Boolean,
+        default: false
+    },
     // --------------------------------
 
     createdAt: {
@@ -117,16 +122,14 @@ UserSchema.pre('save', async function(next) {
     }
 });
 
-// Update timestamp on update
-UserSchema.pre('findOneAndUpdate', function(next) {
-    this.set({ updatedAt: Date.now() });
-    next();
-});
-
 // Method to compare passwords
 UserSchema.methods.verifyPassword = async function(enteredPassword) {
     if (!this.password) return false;
     return await bcrypt.compare(enteredPassword, this.password);
+};
+
+UserSchema.methods.isUserBlocked = function() {
+    return this.isBlocked === true;
 };
 
 // Virtual for full name

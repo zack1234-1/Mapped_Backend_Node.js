@@ -290,8 +290,8 @@ try {
 }
 
 // ✅ SUPPORT ROUTES - ADDED
-try {
-  // Support routes
+try 
+{
   const supportRoutes = require('./routes/supportRoutes');
   app.use('/api/support', supportRoutes);
   console.log('✅ Support routes loaded');

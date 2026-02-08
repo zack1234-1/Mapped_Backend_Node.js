@@ -130,7 +130,7 @@ module.exports = (asyncHandler) => {
                     id: user._id,
                     name: user.name,
                     email: user.email,
-                    // Only return basic user info
+                    isBlocked: user.isBlocked
                 }
             });
         } catch (err) {

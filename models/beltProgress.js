@@ -1,8 +1,6 @@
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
-// --- Sub-Schemas for Each Belt ---
-
 // White (W)
 const WhiteBeltSchema = new Schema({
     planSessionCount: { type: Number, default: 0 },

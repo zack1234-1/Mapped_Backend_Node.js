@@ -2,22 +2,10 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const cloudinary = require('../config/cloudinary');
 
-// 1. CONFIGURE STORAGE
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        const dir = './uploads/users';
-        if (!fs.existsSync(dir)){
-            fs.mkdirSync(dir, { recursive: true });
-        }
-        cb(null, 'uploads/users/');
-    },
-    filename: (req, file, cb) => {
-        cb(null, `user-${Date.now()}${path.extname(file.originalname)}`);
-    }
-});
+// 1. CONFIGURE STORAGE (Memory storage for Cloudinary)
+const storage = multer.memoryStorage();
 
 // 2. FILE FILTER
 const fileFilter = (req, file, cb) => {
@@ -42,7 +30,7 @@ const fileFilter = (req, file, cb) => {
 
 const upload = multer({ 
     storage: storage,
-    limits: { fileSize: 1024 * 1024 * 10 }, // 10MB
+    limits: { fileSize: 1024 * 1024 * 2 }, // 2MB limit for profile pictures
     fileFilter: fileFilter
 });
 
@@ -111,17 +99,42 @@ router.put('/:id', upload.single('avatar'), async (req, res) => {
 
         // Update avatar if uploaded
         if (req.file) {
-            // Delete old avatar if exists
-            if (user.avatar && fs.existsSync(user.avatar)) {
-                try {
-                    fs.unlinkSync(user.avatar);
-                    console.log('✓ Old avatar deleted:', user.avatar);
-                } catch (unlinkErr) {
-                    console.error('✗ Error deleting old avatar:', unlinkErr);
+            try {
+                // Delete old avatar from Cloudinary if exists
+                if (user.avatar && user.avatar.includes('cloudinary')) {
+                    try {
+                        const urlParts = user.avatar.split('/');
+                        const fileName = urlParts[urlParts.length - 1];
+                        const publicId = `users/${fileName.split('.')[0]}`;
+                        await cloudinary.uploader.destroy(publicId);
+                        console.log('✅ Old avatar deleted from Cloudinary:', publicId);
+                    } catch (deleteError) {
+                        console.error('⚠️  Error deleting old avatar:', deleteError);
+                    }
                 }
+
+                // Upload new avatar to Cloudinary
+                const uploadResult = await new Promise((resolve, reject) => {
+                    const uploadStream = cloudinary.uploader.upload_stream(
+                        { folder: 'users' },
+                        (error, result) => {
+                            if (error) reject(error);
+                            else resolve(result);
+                        }
+                    );
+                    uploadStream.end(req.file.buffer);
+                });
+
+                user.avatar = uploadResult.secure_url;
+                console.log('✅ New avatar uploaded to Cloudinary:', user.avatar);
+            } catch (cloudinaryError) {
+                console.error('❌ Cloudinary upload error:', cloudinaryError);
+                return res.status(500).json({ 
+                    success: false, 
+                    message: 'Avatar upload failed', 
+                    error: cloudinaryError.message 
+                });
             }
-            user.avatar = req.file.path.replace(/\\/g, "/");
-            console.log('✓ New avatar saved:', user.avatar);
         }
 
         await user.save();
@@ -164,27 +177,52 @@ router.put('/picture/:id', upload.single('profileImage'), async (req, res) => {
             });
         }
 
-        // Delete old avatar
-        if (user.avatar && fs.existsSync(user.avatar)) {
-            try {
-                fs.unlinkSync(user.avatar);
-            } catch (unlinkErr) {
-                console.error('Error deleting old avatar:', unlinkErr);
+        try {
+            // Delete old avatar from Cloudinary if exists
+            if (user.avatar && user.avatar.includes('cloudinary')) {
+                try {
+                    const urlParts = user.avatar.split('/');
+                    const fileName = urlParts[urlParts.length - 1];
+                    const publicId = `users/${fileName.split('.')[0]}`;
+                    await cloudinary.uploader.destroy(publicId);
+                    console.log('✅ Old avatar deleted from Cloudinary:', publicId);
+                } catch (deleteError) {
+                    console.error('⚠️  Error deleting old avatar:', deleteError);
+                }
             }
+
+            // Upload new avatar to Cloudinary
+            const uploadResult = await new Promise((resolve, reject) => {
+                const uploadStream = cloudinary.uploader.upload_stream(
+                    { folder: 'users' },
+                    (error, result) => {
+                        if (error) reject(error);
+                        else resolve(result);
+                    }
+                );
+                uploadStream.end(req.file.buffer);
+            });
+
+            user.avatar = uploadResult.secure_url;
+            console.log('✅ Avatar uploaded to Cloudinary:', user.avatar);
+            await user.save();
+
+            const updatedUser = await User.findById(req.params.id).select('-password');
+
+            res.json({ 
+                success: true,
+                msg: 'Photo updated successfully', 
+                avatar: updatedUser.avatar,
+                user: updatedUser 
+            });
+        } catch (cloudinaryError) {
+            console.error('❌ Cloudinary upload error:', cloudinaryError);
+            return res.status(500).json({ 
+                success: false, 
+                message: 'Avatar upload failed', 
+                error: cloudinaryError.message 
+            });
         }
-
-        const avatarUrl = req.file.path.replace(/\\/g, "/");
-        user.avatar = avatarUrl;
-        await user.save();
-
-        const updatedUser = await User.findById(req.params.id).select('-password');
-
-        res.json({ 
-            success: true,
-            msg: 'Photo updated successfully', 
-            avatar: updatedUser.avatar,
-            user: updatedUser 
-        });
 
     } catch (err) {
         console.error('Upload picture error:', err.message);

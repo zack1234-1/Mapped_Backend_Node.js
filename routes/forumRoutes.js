@@ -7,7 +7,6 @@ const path = require('path');
 const fs = require('fs');
 const mongoose = require('mongoose');
 
-// --- MULTER SETUP ---
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         const dir = './uploads/posts';
@@ -20,7 +19,6 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage, limits: { fileSize: 5 * 1024 * 1024 } });
 
-// 1. CREATE POST
 router.post('/', upload.array('postImages', 10), async (req, res) => {
     try {
         const userId = req.body.userId; 
@@ -28,7 +26,6 @@ router.post('/', upload.array('postImages', 10), async (req, res) => {
             return res.status(400).json({ msg: 'Missing userId' });
         }
         
-        // Validate ID format to prevent crashes
         if (!mongoose.Types.ObjectId.isValid(userId)) {
              return res.status(400).json({ msg: 'Invalid userId format' });
         }
@@ -65,18 +62,32 @@ router.post('/', upload.array('postImages', 10), async (req, res) => {
     }
 });
 
-// 2. GET ALL POSTS
 router.get('/', async (req, res) => {
     try {
-        const posts = await Post.find().sort({ isPinned: -1, date: -1 });
-        res.json(posts);
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 5;
+        const skip = (page - 1) * limit;
+
+        const totalPosts = await Post.countDocuments();
+        const totalPages = Math.ceil(totalPosts / limit);
+
+        const posts = await Post.find()
+            .sort({ isPinned: -1, date: -1 })
+            .skip(skip)
+            .limit(limit);
+
+        res.json({
+            posts: posts,
+            currentPage: page,
+            totalPages: totalPages,
+            totalPosts: totalPosts
+        });
     } catch (err) {
         console.error('Get Posts Error:', err);
         res.status(500).json({ msg: 'Server Error', error: err.message });
     }
 });
 
-// 3. GET POPULAR TAGS (MOVED UP - Must be before /:id)
 router.get('/tags', async (req, res) => {
     try {
         const tags = await Post.aggregate([
@@ -93,10 +104,12 @@ router.get('/tags', async (req, res) => {
     }
 });
 
-// 4. SEARCH POSTS (MOVED UP - Must be before /:id)
 router.get('/search', async (req, res) => {
     try {
-        const { q, tag } = req.query; 
+        const { q, tag } = req.query;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 5;
+        const skip = (page - 1) * limit;
 
         if (!q && !tag) {
             return res.status(400).json({ msg: 'No query or tag provided' });
@@ -104,12 +117,10 @@ router.get('/search', async (req, res) => {
 
         let query = {};
 
-        // Tag search
         if (tag) {
             query.tags = { $regex: tag, $options: 'i' };
         }
 
-        // Text search (combined with tag if both exist)
         if (q) {
             query.$or = [
                 { text: { $regex: q, $options: 'i' } },
@@ -118,18 +129,28 @@ router.get('/search', async (req, res) => {
             ];
         }
 
-        const posts = await Post.find(query).sort({ isPinned: -1, date: -1 });
-        res.json(posts);
+        const totalPosts = await Post.countDocuments(query);
+        const totalPages = Math.ceil(totalPosts / limit);
+
+        const posts = await Post.find(query)
+            .sort({ isPinned: -1, date: -1 })
+            .skip(skip)
+            .limit(limit);
+
+        res.json({
+            posts: posts,
+            currentPage: page,
+            totalPages: totalPages,
+            totalPosts: totalPosts
+        });
     } catch (err) {
         console.error('Search Posts Error:', err);
         res.status(500).json({ msg: 'Server Error', error: err.message });
     }
 });
 
-// 5. GET SINGLE POST (MOVED DOWN - This catches everything else)
 router.get('/:id', async (req, res) => {
     try {
-        // Double check ID validity before querying
         if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
             return res.status(404).json({ msg: 'Post not found (Invalid ID)' });
         }
@@ -144,7 +165,6 @@ router.get('/:id', async (req, res) => {
     }
 });
 
-// 6. TOGGLE PIN
 router.put('/pin/:id', async (req, res) => {
     try {
         const post = await Post.findById(req.params.id);
@@ -160,7 +180,6 @@ router.put('/pin/:id', async (req, res) => {
     }
 });
 
-// 7. REPORT A POST
 router.post('/report/:id', async (req, res) => {
     try {
         const { userId, reason } = req.body;
@@ -183,7 +202,6 @@ router.post('/report/:id', async (req, res) => {
     }
 });
 
-// 8. LIKE POST
 router.put('/like/:id', async (req, res) => {
     try {
         const { userId } = req.body;
@@ -208,7 +226,6 @@ router.put('/like/:id', async (req, res) => {
     }
 });
 
-// 9. COMMENT ON POST
 router.post('/comment/:id', async (req, res) => {
     try {
         const { userId, text } = req.body;
@@ -238,7 +255,6 @@ router.post('/comment/:id', async (req, res) => {
     }
 });
 
-// 10. DELETE POST
 router.delete('/:id', async (req, res) => {
     try {
         const { userId } = req.body;
@@ -251,7 +267,6 @@ router.delete('/:id', async (req, res) => {
             return res.status(401).json({ msg: 'User not authorized to delete this post' });
         }
 
-        // Delete associated files
         if (post.images && post.images.length > 0) {
             post.images.forEach(imagePath => {
                 if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);

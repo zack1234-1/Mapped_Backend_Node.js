@@ -7,10 +7,13 @@ const mongoose = require('mongoose');
 module.exports = (asyncHandler) => {
     
     // @route   GET /api/admin/reports
-    router.get('/reports', asyncHandler(async (req, res, next) => {
+   router.get('/reports', asyncHandler(async (req, res, next) => {
         const reportedPosts = await Forum.find({
             reports: { $exists: true, $not: { $size: 0 } }
-        }).sort({ date: -1 });
+        })
+        .sort({ date: -1 })
+        // ADD THIS LINE: This pulls name, avatar, AND isBlocked from the User collection
+        .populate('user', 'name avatar isBlocked'); 
 
         res.json({
             success: true,

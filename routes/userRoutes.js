@@ -11,7 +11,7 @@ module.exports = (asyncHandler) => {
             service: 'Gmail', // Or your preferred service
             auth: {
                 user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASS, // Use App Password for Gmail
+                pass: process.env.EMAIL_PASS, 
             },
         });
 
@@ -97,8 +97,17 @@ module.exports = (asyncHandler) => {
 
             if (!user) {
                 return res.status(400).json({ 
-                    success: false,
+                    success: false, 
                     msg: 'Invalid Credentials' 
+                });
+            }
+
+            console.log(`User ${user.email} isBlocked status:`, user.isBlocked);
+
+            if (user.isBlocked === true) {
+                return res.status(403).json({ 
+                    success: false, 
+                    msg: 'You are being blocked. Please contact support.' 
                 });
             }
 
@@ -106,7 +115,7 @@ module.exports = (asyncHandler) => {
 
             if (!isMatch) {
                 return res.status(400).json({ 
-                    success: false,
+                    success: false, 
                     msg: 'Invalid Credentials' 
                 });
             }
@@ -130,13 +139,13 @@ module.exports = (asyncHandler) => {
                     id: user._id,
                     name: user.name,
                     email: user.email,
-                    isBlocked: user.isBlocked
                 }
             });
-        } catch (err) {
+        }
+        catch (err) {
             console.error('Login error:', err);
             res.status(500).json({ 
-                success: false,
+                success: false, 
                 msg: 'Server error',
                 error: err.message 
             });

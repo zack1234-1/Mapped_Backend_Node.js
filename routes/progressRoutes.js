@@ -5,23 +5,20 @@ const Progress = require('../models/progress');
 module.exports = (asyncHandler) => {
     const router = express.Router();
     const TOTAL_FORM_COUNT = 8;
-
-    // ==========================================
-    // 1. POST /api/progress - Save/Update Progress inside the Array
-    // ==========================================
+    
     router.post('/', asyncHandler(async (req, res, next) => {
         console.log('=== PROGRESS SAVE REQUEST (Combined) ===');
         
         // Destructure mutable variables
-        let { traineeId, form, techniques, kicks } = req.body;
+        let { traineeId, beltColor, form, techniques, kicks } = req.body;
 
-        if (!traineeId || !form) {
-            return res.status(400).json({ success: false, msg: 'Trainee ID and Form are required' });
+        if (!traineeId || !beltColor || !form) {
+            return res.status(400).json({ success: false, msg: 'Trainee ID, Belt Color, and Form are required' });
         }
 
-        // --- CRITICAL FIX: Trim form name to prevent duplicates ---
-        // This ensures "Pattern 2 " becomes "Pattern 2" so it matches the existing DB entry.
+        // --- CRITICAL FIX: Trim form name and beltColor to prevent duplicates ---
         form = form.trim();
+        beltColor = beltColor.trim();
 
         // --- CALCULATION LOGIC ---
         let currentScore = 0;
@@ -41,7 +38,10 @@ module.exports = (asyncHandler) => {
         }
 
         const maxPossibleScore = totalItems * 2;
-        const percentage = totalItems > 0 ? (currentScore / maxPossibleScore) : 0;
+        let percentage = totalItems > 0 ? (currentScore / maxPossibleScore) : 0;
+
+        // Fix percentage to 2 decimal places
+        percentage = parseFloat(percentage.toFixed(2));
 
         // The new form data object
         const newFormData = {
@@ -52,60 +52,88 @@ module.exports = (asyncHandler) => {
             percentage: percentage
         };
 
-        try {
-            // 1. Check if a document exists for this trainee
+                try {
+            // Find the progress document for this trainee
             let progressDoc = await Progress.findOne({ trainee: traineeId });
 
             if (!progressDoc) {
-                // CASE A: Trainee has no progress record yet. Create new Doc.
+                // No progress record yet, create new
                 progressDoc = new Progress({
                     trainee: traineeId,
-                    forms: [newFormData]
+                    beltColor: beltColor,
+                    forms: [newFormData],
+                    overallAverage: parseFloat((percentage / TOTAL_FORM_COUNT).toFixed(2)) // <-- FIXED
                 });
             } else {
-                // CASE B: Trainee exists. Check if this specific Form exists in the array.
-                // Because we trimmed 'form' above, this will now correctly find the existing entry.
-                const formIndex = progressDoc.forms.findIndex(f => f.form === form);
-
-                if (formIndex > -1) {
-                    // Update existing form in the array
-                    // We merge existing data with new data to preserve _id if needed, though usually subdoc replacement is fine
-                    progressDoc.forms[formIndex] = { ...progressDoc.forms[formIndex].toObject(), ...newFormData };
+                // If beltColor has changed, reset forms and overallAverage
+                if (progressDoc.beltColor !== beltColor) {
+                    progressDoc.beltColor = beltColor;
+                    progressDoc.forms = [newFormData];
+                    progressDoc.overallAverage = parseFloat((percentage / TOTAL_FORM_COUNT).toFixed(2)); // <-- FIXED
                 } else {
-                    // Add new form to the array
-                    progressDoc.forms.push(newFormData);
+                    // Update or add form as usual
+                    const formIndex = progressDoc.forms.findIndex(f => f.form === form);
+                    if (formIndex > -1) {
+                        progressDoc.forms[formIndex] = { ...progressDoc.forms[formIndex].toObject(), ...newFormData };
+                    } else {
+                        progressDoc.forms.push(newFormData);
+                    }
+                    // Recalculate average
+                    let sumPercentages = 0;
+                    progressDoc.forms.forEach(formItem => {
+                        sumPercentages += (formItem.percentage || 0);
+                    });
+                    progressDoc.overallAverage = parseFloat((sumPercentages / TOTAL_FORM_COUNT).toFixed(2));
+                    if (progressDoc.overallAverage > 1) progressDoc.overallAverage = 1;
                 }
             }
 
-            // ======================================================
-            // === FIXED: Curriculum Average Calculation ===
-            // ======================================================
-            if (progressDoc.forms && progressDoc.forms.length > 0) {
-                let sumPercentages = 0;
-
-                // Sum up percentages of all saved forms
-                progressDoc.forms.forEach(formItem => {
-                    sumPercentages += (formItem.percentage || 0);
-                });
-
-                // Divide by the fixed total count (8), treating missing forms as 0%
-                progressDoc.overallAverage = sumPercentages / TOTAL_FORM_COUNT;
-
-                // Safety Cap
-                if (progressDoc.overallAverage > 1) progressDoc.overallAverage = 1;
-            } else {
-                progressDoc.overallAverage = 0.0;
-            }
-            // ======================================================
-
             await progressDoc.save();
 
-            console.log(`✅ Combined Progress saved. Form: "${form}", Form Score: ${(percentage*100).toFixed(0)}%, Overall Avg: ${(progressDoc.overallAverage*100).toFixed(0)}%`);
+        // try {
+        //     // Find the progress document for this trainee
+        //     let progressDoc = await Progress.findOne({ trainee: traineeId });
+
+        //     if (!progressDoc) {
+        //         // No progress record yet, create new
+        //         progressDoc = new Progress({
+        //             trainee: traineeId,
+        //             beltColor: beltColor,
+        //             forms: [newFormData],
+        //             overallAverage: percentage
+        //         });
+        //     } else {
+        //         // If beltColor has changed, reset forms and overallAverage
+        //         if (progressDoc.beltColor !== beltColor) {
+        //             progressDoc.beltColor = beltColor;
+        //             progressDoc.forms = [newFormData];
+        //             progressDoc.overallAverage = percentage;
+        //         } else {
+        //             // Update or add form as usual
+        //             const formIndex = progressDoc.forms.findIndex(f => f.form === form);
+        //             if (formIndex > -1) {
+        //                 progressDoc.forms[formIndex] = { ...progressDoc.forms[formIndex].toObject(), ...newFormData };
+        //             } else {
+        //                 progressDoc.forms.push(newFormData);
+        //             }
+        //             // Recalculate average
+        //             let sumPercentages = 0;
+        //             progressDoc.forms.forEach(formItem => {
+        //                 sumPercentages += (formItem.percentage || 0);
+        //             });
+        //             progressDoc.overallAverage = sumPercentages / TOTAL_FORM_COUNT;
+        //             if (progressDoc.overallAverage > 1) progressDoc.overallAverage = 1;
+        //         }
+        //     }
+
+        //     await progressDoc.save();
+
+            console.log(`✅ Progress saved. Belt: "${beltColor}", Form: "${form}", Form Score: ${(percentage*100).toFixed(0)}%, Overall Avg: ${(progressDoc.overallAverage*100).toFixed(0)}%`);
 
             res.status(200).json({
                 success: true,
                 msg: 'Progress saved successfully',
-                data: newFormData // Return just the form data so frontend behaves normally
+                data: newFormData
             });
 
         } catch (err) {
@@ -117,16 +145,15 @@ module.exports = (asyncHandler) => {
     // ==========================================
     // 2. GET /api/progress/:traineeId/:form 
     // ==========================================
-    router.get('/:traineeId/:form', asyncHandler(async (req, res) => {
-        const { traineeId, form } = req.params;
-        
-        // --- CRITICAL FIX: Trim the decoded form name ---
-        // Frontend sends encoded "Pattern%202%20", we decode then trim to "Pattern 2"
+    // GET /api/progress/:traineeId/:beltColor/:form
+    router.get('/:traineeId/:beltColor/:form', asyncHandler(async (req, res) => {
+        const { traineeId, beltColor, form } = req.params;
         const decodedForm = decodeURIComponent(form).trim();
+        const decodedBeltColor = decodeURIComponent(beltColor).trim();
 
         try {
-            // Find the big document
-            const progressDoc = await Progress.findOne({ trainee: traineeId });
+            // Find the document for this trainee and belt color
+            const progressDoc = await Progress.findOne({ trainee: traineeId, beltColor: decodedBeltColor });
 
             if (!progressDoc) {
                 return res.status(200).json({
@@ -145,7 +172,6 @@ module.exports = (asyncHandler) => {
                 });
             }
 
-            // Return JUST the specific form data, so Flutter doesn't get confused
             res.status(200).json({
                 success: true,
                 data: specificForm
@@ -160,33 +186,57 @@ module.exports = (asyncHandler) => {
     // ==========================================
     // 3. GET /api/progress/:traineeId - Get ALL forms for calculation
     // ==========================================
-    router.get('/:traineeId', asyncHandler(async (req, res) => {
-        const { traineeId } = req.params;
+    // GET /api/progress/:traineeId/:beltColor - Get ALL forms for a belt color
+    router.get('/:traineeId/:beltColor', asyncHandler(async (req, res) => {
+        const { traineeId, beltColor } = req.params;
+        const decodedBeltColor = decodeURIComponent(beltColor).trim();
 
         try {
-            const progressDoc = await Progress.findOne({ trainee: traineeId });
+            const progressDoc = await Progress.findOne({ trainee: traineeId, beltColor: decodedBeltColor });
 
             if (!progressDoc || !progressDoc.forms || progressDoc.forms.length === 0) {
                 return res.status(200).json({
                     success: true,
                     data: {
-                    forms: [],
-                    overallAverage: 0.0 // Default to 0
-                }
+                        forms: [],
+                        overallAverage: 0.0
+                    }
                 });
             }
 
-            // Return all forms so frontend can calculate average
             res.status(200).json({
                 success: true,
                 data: {
-                forms: progressDoc.forms,
-                overallAverage: progressDoc.overallAverage || 0.0 
-            }
+                    forms: progressDoc.forms,
+                    overallAverage: progressDoc.overallAverage || 0.0
+                }
             });
 
         } catch (err) {
             console.error('Fetch All Progress Error:', err);
+            res.status(500).json({ success: false, msg: 'Server Error' });
+        }
+    }));
+
+        // ==========================================
+    // 4. DELETE /api/progress/:traineeId - Delete all progress for a trainee
+    // ==========================================
+    router.delete('/:traineeId', asyncHandler(async (req, res) => {
+        const { traineeId } = req.params;
+        try {
+           
+            const result = await Progress.deleteMany({ trainee: traineeId });
+            
+            console.log(`🗑️ Progress deleted for trainee: ${traineeId}. Count: ${result.deletedCount}`);
+
+            res.status(200).json({ 
+                success: true, 
+                msg: 'Progress deleted successfully',
+                deletedCount: result.deletedCount 
+            });
+
+        } catch (err) {
+            console.error('Delete Progress Error:', err);
             res.status(500).json({ success: false, msg: 'Server Error' });
         }
     }));

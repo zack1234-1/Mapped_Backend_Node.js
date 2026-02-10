@@ -115,6 +115,11 @@ router.post('/', upload.any(), async (req, res) => {
         if (!videoUrls) videoUrls = [];
         if (!linkUrl) linkUrl = "";
 
+        // Ensure arrays are initialized if missing
+        if (!imageUrls) imageUrls = [];
+        if (!videoUrls) videoUrls = [];
+        if (!linkUrl) linkUrl = "";
+
         // Determine Type
         let finalType = 'Text';
         const inputType = type || resourceType;

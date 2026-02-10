@@ -6,6 +6,7 @@ const BeltProgressRingSchema = new mongoose.Schema({
         required: true,
         unique: true, // e.g., "White", "Yellow"
         trim: true
+        
     },
     // Stored as an integer (0-100) to match your UI requirements
     averagePercentage: {

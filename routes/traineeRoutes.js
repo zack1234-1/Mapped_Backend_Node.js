@@ -29,6 +29,7 @@ module.exports = (asyncHandler) => {
         console.log('📥 Received request body:', req.body);
 
         let { // Use 'let' because we will reassign belt and gender
+            trainerId,
             name,
             belt,
             dateOfBirth,
@@ -39,11 +40,14 @@ module.exports = (asyncHandler) => {
             guardianName,
             guardianContact,
             guardianAddress,
-            image
+            image,
+            goals,
+            conditions,
+            competency
         } = req.body;
 
         // 1. Validate required fields
-        if (!name || !belt || !dateOfBirth || !gender || !phone || !email || !address || !guardianName || !guardianContact || !guardianAddress) {
+        if (!trainerId || !name || !belt || !dateOfBirth || !gender || !phone || !email || !address || !guardianName || !guardianContact || !guardianAddress) {
             console.log('❌ Missing required fields');
             return res.status(400).json({
                 success: false,
@@ -72,6 +76,7 @@ module.exports = (asyncHandler) => {
             
             // Create new trainee
             const trainee = new Trainee({
+                trainerId,
                 name,
                 belt, // Now using the formatted 'Belt'
                   dateOfBirth: new Date(formatDate(dateOfBirth)), 
@@ -82,6 +87,9 @@ module.exports = (asyncHandler) => {
                 guardianName,
                 guardianContact,
                 guardianAddress,
+                goals: goals || '',
+                conditions: conditions || '',
+                competency: competency || '',
                 image: image || null
             });
 

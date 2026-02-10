@@ -2,6 +2,11 @@ const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
 const TraineeSchema = new Schema({
+    trainerId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: [true, 'Trainer ID is required']
+    },
     name: {
         type: String,
         required: [true, 'Name is required'],
@@ -75,6 +80,18 @@ const TraineeSchema = new Schema({
         required: [true, 'Guardian address is required'],
         trim: true,
         maxlength: [200, 'Guardian address cannot exceed 200 characters']
+    },
+    goals: {
+        type: String,
+        default: ''
+    },
+    conditions: {
+        type: String,
+        default: ''
+    },
+    competency: {
+        type: String,
+        default: ''
     },
     image: {
         type: String,

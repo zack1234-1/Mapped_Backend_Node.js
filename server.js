@@ -1,11 +1,13 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const multer = require("multer");
+const cloudinary = require("./config/cloudinary");
 const path = require('path');
 require('dotenv').config();
 
 const app = express();
-const port = process.env.PORT || 5000;
+const port = process.env.PORT || 5001;
 
 // Utility function to wrap async route handlers
 const asyncHandler = fn => (req, res, next) => {
@@ -16,8 +18,8 @@ const asyncHandler = fn => (req, res, next) => {
 app.get('/health', (req, res) => {
   const mongoState = mongoose.connection.readyState;
   const mongoStatus = mongoState === 1 ? 'connected' : 
-                     mongoState === 2 ? 'connecting' :
-                     mongoState === 3 ? 'disconnecting' : 'disconnected';
+                      mongoState === 2 ? 'connecting' :
+                      mongoState === 3 ? 'disconnecting' : 'disconnected';
   
   res.status(200).json({ 
     status: 'OK', 
@@ -27,6 +29,40 @@ app.get('/health', (req, res) => {
     uptime: process.uptime()
   });
 });
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
+
+app.post("/uploadTest", upload.single("image"), async (req, res) => {
+  try {
+    // Check if file exists
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    // Upload to cloudinary using upload_stream
+    const uploadStream = cloudinary.uploader.upload_stream(
+      { folder: "posts" },
+      (error, result) => {
+        if (error) {
+          console.error("Cloudinary error:", error);
+          return res.status(500).json({ error: error.message });
+        }
+        res.json({
+          message: "Upload success",
+          imageUrl: result.secure_url,
+        });
+      }
+    );
+
+    // Pipe the buffer to the upload stream
+    uploadStream.end(req.file.buffer);
+
+  } catch (err) {
+    console.error("Server error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -39,9 +75,12 @@ app.get('/', (req, res) => {
       session: '/api/session',
       progress: '/api/progress',
       beltProgress: '/api/belt-progress',
-      resource: '/api/resource',
+      resources: '/api/resources',
       profile: '/api/profile',
-      forum: '/api/forum'
+      forum: '/api/forum',
+      coachbot: '/api/coachbot',
+      support: '/api/support',
+      admin: '/api/admin'
     },
     documentation: 'API documentation available at /api-docs (if implemented)'
   });
@@ -137,8 +176,8 @@ app.get('/api', (req, res) => {
         methods: ['GET', 'POST', 'PUT'],
         description: 'Belt progress tracking'
       },
-      resource: {
-        path: '/api/resource',
+      resources: {
+        path: '/api/resources',
         methods: ['GET', 'POST', 'DELETE'],
         description: 'Resource management'
       },
@@ -151,6 +190,16 @@ app.get('/api', (req, res) => {
         path: '/api/forum',
         methods: ['GET', 'POST', 'PUT', 'DELETE'],
         description: 'Forum discussions'
+      },
+      support: {
+        path: '/api/support',
+        methods: ['GET', 'POST', 'PUT', 'DELETE'],
+        description: 'Support ticket system'
+      },
+      admin: {
+        path: '/api/admin',
+        methods: ['GET', 'DELETE', 'PATCH'],
+        description: 'Admin management for reports and users'
       }
     }
   });
@@ -235,16 +284,16 @@ try {
 try {
   // Resource routes
   const resourceRoutes = require('./routes/resourceRoutes');
-  if (typeof resourceRoutes === 'function') {
-    app.use('/api/resource', resourceRoutes(asyncHandler));
-    console.log('✅ Resource routes loaded');
+
+  if (typeof resourceRoutes === 'function' && !resourceRoutes.stack) {
+      app.use('/api/resources', resourceRoutes(asyncHandler));
   } else {
-    console.log('⚠️  Resource routes not a function, using default');
-    app.use('/api/resource', (req, res) => res.status(501).json({ error: 'Resource routes not implemented' }));
+      app.use('/api/resources', resourceRoutes);
   }
+  console.log('✅ Resource routes loaded');
 } catch (error) {
   console.error('❌ Failed to load resource routes:', error.message);
-  app.use('/api/resource', (req, res) => res.status(501).json({ error: 'Resource routes failed to load' }));
+  app.use('/api/resources', (req, res) => res.status(501).json({ error: 'Resource routes failed to load' }));
 }
 
 try {
@@ -277,6 +326,47 @@ try {
   app.use('/api/forum', (req, res) => res.status(501).json({ error: 'Forum routes failed to load' }));
 }
 
+try {
+  // CoachBot routes
+  const coachBotRoutes = require('./routes/coachBotRoutes');
+  if (typeof coachBotRoutes === 'function') {
+    app.use('/api/coachbot', coachBotRoutes(asyncHandler));
+    console.log('✅ CoachBot routes loaded');
+  } else {
+    console.log('⚠️  CoachBot routes not a function, using default');
+    app.use('/api/coachbot', (req, res) => res.status(501).json({ error: 'CoachBot routes not implemented' }));
+  }
+} catch (error) {
+  console.error('❌ Failed to load CoachBot routes:', error.message);
+  app.use('/api/coachbot', (req, res) => res.status(501).json({ error: 'CoachBot routes failed to load' }));
+}
+
+// ✅ SUPPORT ROUTES - ADDED
+try 
+{
+  const supportRoutes = require('./routes/supportRoutes');
+  app.use('/api/support', supportRoutes);
+  console.log('✅ Support routes loaded');
+} catch (error) {
+  console.error('❌ Failed to load support routes:', error.message);
+  app.use('/api/support', (req, res) => res.status(501).json({ error: 'Support routes failed to load' }));
+}
+
+try {
+  // Admin Management routes
+  const adminRoutes = require('./routes/adminRoutes');
+  if (typeof adminRoutes === 'function') {
+    app.use('/api/admin', adminRoutes(asyncHandler));
+    console.log('✅ Admin Management routes loaded');
+  } else {
+    console.log('⚠️  Admin routes not a function, using default');
+    app.use('/api/admin', (req, res) => res.status(501).json({ error: 'Admin routes not implemented' }));
+  }
+} catch (error) {
+  console.error('❌ Failed to load admin routes:', error.message);
+  app.use('/api/admin', (req, res) => res.status(501).json({ error: 'Admin routes failed to load' }));
+}
+
 // FIXED: 404 handler for undefined API routes - Using regex instead of wildcard
 app.use(/^\/api\/.+$/, (req, res) => {
   res.status(404).json({
@@ -289,9 +379,12 @@ app.use(/^\/api\/.+$/, (req, res) => {
       '/api/session',
       '/api/progress',
       '/api/belt-progress',
-      '/api/resource',
+      '/api/resources',
       '/api/profile',
       '/api/forum',
+      '/api/coachbot',
+      '/api/support',
+      '/api/admin',
       '/health',
       '/api/test',
       '/api/test-trainee'

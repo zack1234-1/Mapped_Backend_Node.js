@@ -256,12 +256,16 @@ router.post('/verify-otp', asyncHandler(async (req, res) => {
   });
 }));
 
-// 7. RESET PASSWORD
 router.post('/reset-password', asyncHandler(async (req, res) => {
-  const { email, otp, newPassword } = req.body;
+  let { email, otp, newPassword } = req.body;
+
+  // Defensive Check: If email is an object, extract the string
+  if (typeof email === 'object' && email.email) {
+    email = email.email;
+  }
 
   const user = await User.findOne({
-    email: email,
+    email: email, // Now guaranteed to be a string
     resetPasswordToken: otp,
     resetPasswordExpires: { $gt: Date.now() }
   });

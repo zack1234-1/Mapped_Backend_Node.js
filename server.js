@@ -207,18 +207,16 @@ app.get('/api', (req, res) => {
 
 // Load and use routes with error handling
 try {
-  // User routes
+  // User routes - FIXED: Load as direct router, not function
   const userRoutes = require('./routes/userRoutes');
-  if (typeof userRoutes === 'function') {
-    app.use('/api/users', userRoutes(asyncHandler));
-    console.log('✅ User routes loaded');
-  } else {
-    console.log('⚠️  User routes not a function, using default');
-    app.use('/api/users', (req, res) => res.status(501).json({ error: 'User routes not implemented' }));
-  }
+  app.use('/api/users', userRoutes);
+  console.log('✅ User routes loaded');
 } catch (error) {
   console.error('❌ Failed to load user routes:', error.message);
-  app.use('/api/users', (req, res) => res.status(501).json({ error: 'User routes failed to load' }));
+  app.use('/api/users', (req, res) => res.status(501).json({ 
+    error: 'User routes failed to load',
+    details: error.message 
+  }));
 }
 
 try {

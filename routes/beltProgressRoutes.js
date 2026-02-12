@@ -1,278 +1,403 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const BeltProgress = require('../models/beltProgress');
-const Session = require('../models/session');
 const User = require('../models/User');
-const Post = require('../models/Post');
-
-const BELT_POST_REQ = { 'W': 0, 'Y': 0, 'G': 1, 'B': 1, 'R': 0, 'L': 0 };
-const BELT_SHARE_TIP_REQ = { 'W': 0, 'Y': 0, 'G': 0, 'B': 1, 'R': 3, 'L': 0 };
-const BELT_SESSION_REQ = { 'W': 3, 'Y': 5, 'G': 8, 'B': 20, 'R': 20, 'L': 0 };
-const BELT_ACTIVE_DAY_REQ = { 'W': 3, 'Y': 5, 'G': 14, 'B': 30, 'R': 60, 'L': 0 };
-const BELT_RESOURCE_REQ = { 'W': 3, 'Y': 0, 'G': 0, 'B': 0, 'R': 0, 'L': 0 };
-const BELT_REFLECTION_REQ = { 'W': 0, 'Y': 0, 'G': 1, 'B': 0, 'R': 0, 'L': 0 };
-const BELT_RECOMMENDATION_REQ = { 'W': 0, 'Y': 3, 'G': 5, 'B': 0, 'R': 10, 'L': 0 };
-
 const BELT_ORDER = ['W', 'Y', 'G', 'B', 'R', 'L'];
 
-const calculateTotalRecommendations = (doc) => {
-    if (!doc || !doc.belts) return 0;
-    const y = doc.belts.Y?.recommendationCount || 0;
-    const g = doc.belts.G?.recommendationCount || 0;
-    const r = doc.belts.R?.recommendationCount || 0;
-    return y + g + r;
+const REQUIREMENTS = {
+    'W': { session: 3, activeDay: 3, post: 0, shareTip: 0, resource: 3, reflection: 0, recommendation: 0 },
+    'Y': { session: 5, activeDay: 5, post: 0, shareTip: 0, resource: 0, reflection: 0, recommendation: 3 },
+    'G': { session: 8, activeDay: 14, post: 1, shareTip: 0, resource: 0, reflection: 1, recommendation: 5 },
+    'B': { session: 20, activeDay: 30, post: 1, shareTip: 1, resource: 0, reflection: 0, recommendation: 0 },
+    'R': { session: 20, activeDay: 60, post: 0, shareTip: 3, resource: 0, reflection: 0, recommendation: 10 },
+    'L': { session: 0, activeDay: 0, post: 0, shareTip: 0, resource: 0, reflection: 0, recommendation: 0 }
 };
 
-const distributeCountToBelts = (totalCount, requirements) => {
-    let remaining = totalCount;
-    const distribution = {};
-    BELT_ORDER.forEach(code => {
-        const req = requirements[code];
-        const count = Math.min(Math.max(remaining, 0), req);
-        distribution[code] = count;
-        remaining -= req;
-    });
-    return distribution;
+const BELT_NAMES = {
+    'W': 'White',
+    'Y': 'Yellow',
+    'G': 'Green', 
+    'B': 'Blue',
+    'R': 'Brown',
+    'L': 'Black'
 };
 
-const getBeltCode = (input) => {
-    if (!input) return null;
-    const normalized = input.trim();
-    const map = { 'White': 'W', 'Yellow': 'Y', 'Green': 'G', 'Blue': 'B', 'Brown': 'R', 'Black': 'L' };
-    if (Object.values(map).includes(normalized)) return normalized;
-    return map[normalized] || normalized; 
+const FIELD_MAP = {
+    'active_day': 'activeDayCount',
+    'session': 'planSessionCount',
+    'post': 'postCount',
+    'share_tip': 'shareTipCount',
+    'resource': 'openResourceCount',
+    'reflection': 'reflectionCount',
+    'recommendation': 'recommendationCount'
 };
 
-const calculateTotalActiveDays = (progressDoc) => {
-    if (!progressDoc || !progressDoc.belts) return 0;
-    let total = 0;
-    const codes = ['W', 'Y', 'G', 'B', 'R', 'L'];
-    codes.forEach(code => {
-        if (progressDoc.belts[code] && progressDoc.belts[code].activeDayCount) {
-            total += progressDoc.belts[code].activeDayCount;
+const REQ_MAP = {
+    'active_day': 'activeDay',
+    'session': 'session',
+    'post': 'post',
+    'share_tip': 'shareTip',
+    'resource': 'resource',
+    'reflection': 'reflection',
+    'recommendation': 'recommendation'
+};
+
+
+// Percentage Calculator
+const calculatePercentage = (beltData, req) => {
+    let totalReq = req.session + req.activeDay + req.post + req.shareTip + req.resource + req.reflection + req.recommendation;
+    if (totalReq === 0) return 100; // Avoid division by zero for empty requirements
+
+    let totalDone = 
+        Math.min(beltData.planSessionCount||0, req.session) + 
+        Math.min(beltData.activeDayCount||0, req.activeDay) + 
+        Math.min(beltData.postCount||0, req.post) + 
+        Math.min(beltData.shareTipCount||0, req.shareTip) + 
+        Math.min(beltData.openResourceCount||0, req.resource) + 
+        Math.min(beltData.reflectionCount || 0, req.reflection) + 
+        Math.min(beltData.recommendationCount||0, req.recommendation);
+    
+    return Math.min(Math.round((totalDone / totalReq) * 100), 100);
+};
+
+// Strict Requirement Check
+const areRequirementsMet = (beltData, req) => {
+    return (
+        (beltData.planSessionCount || 0) >= req.session &&
+        (beltData.activeDayCount || 0) >= req.activeDay &&
+        (beltData.postCount || 0) >= req.post &&
+        (beltData.shareTipCount || 0) >= req.shareTip &&
+        (beltData.openResourceCount || 0) >= req.resource &&
+        (beltData.reflectionCount || 0) >= req.reflection &&
+        (beltData.recommendationCount || 0) >= req.recommendation
+    );
+};
+
+// Find Active Belt Code 
+const findActiveBeltCode = (progressDoc) => {
+    if (!progressDoc || !progressDoc.belts) return 'W';
+    
+    for (const code of BELT_ORDER) {
+        const beltData = progressDoc.belts[code];
+        if (!beltData || !beltData.isCompleted) {
+            return code;
         }
-    });
-    return total;
+    }
+    return 'L'; 
 };
+
+// Sync User DB Level based on Progress
+const syncUserBeltLevel = async (userId, progressDoc) => {
+    try {
+        let expectedActiveBeltCode = 'W';
+
+        for (const code of BELT_ORDER) {
+            const beltData = progressDoc.belts[code];
+            if (beltData && (beltData.isCompleted || beltData.progressPercentage >= 100)) {
+                const currentIndex = BELT_ORDER.indexOf(code);
+                if (currentIndex < BELT_ORDER.length - 1) {
+                    expectedActiveBeltCode = BELT_ORDER[currentIndex + 1];
+                } else {
+                    expectedActiveBeltCode = 'L'; 
+                }
+            } else {
+                break;
+            }
+        }
+
+        const correctBeltName = BELT_NAMES[expectedActiveBeltCode];
+        const user = await User.findById(userId);
+
+        if (user && user.currentBelt !== correctBeltName) {
+            console.log(`🔄 SYNC: Upgrading User ${userId} from ${user.currentBelt} to ${correctBeltName}`);
+            user.currentBelt = correctBeltName;
+            user.updatedAt = new Date();
+            await user.save();
+            return correctBeltName;
+        }
+    } catch (error) {
+        console.error("Error syncing user belt level:", error);
+    }
+};
+
+// Increment Logic
+const incrementBeltProgress = async (userId, fieldType) => {
+    let progressDoc = await BeltProgress.findOne({ userId });
+    
+    if (!progressDoc) {
+        progressDoc = await BeltProgress.create({ 
+            userId, 
+            belts: { W: { activeDayCount: 0, planSessionCount: 0, postCount: 0, shareTipCount: 0, openResourceCount: 0, reflectionCount: 0, recommendationCount: 0, isCompleted: false, progressPercentage: 0 } } 
+        });
+    }
+
+    const activeCode = findActiveBeltCode(progressDoc);
+    if (activeCode === 'L' && progressDoc.belts['L']?.isCompleted) return; 
+
+    if (fieldType === 'reflection' && activeCode !== 'G') {
+        return; 
+    }
+
+    if (!progressDoc.belts[activeCode]) {
+        progressDoc.belts[activeCode] = { activeDayCount: 0, planSessionCount: 0, postCount: 0, shareTipCount: 0, openResourceCount: 0, reflectionCount: 0, recommendationCount: 0, isCompleted: false, progressPercentage: 0 };
+    }
+
+    const dbField = FIELD_MAP[fieldType];
+    const reqKey = REQ_MAP[fieldType];
+
+    if (!dbField || !reqKey) return;
+
+    const target = REQUIREMENTS[activeCode][reqKey] || 0;
+    if (target === 0) return;
+
+    const currentVal = progressDoc.belts[activeCode][dbField] || 0;
+    if (currentVal < target) {
+        progressDoc.belts[activeCode][dbField] = currentVal + 1;
+    }
+
+    const req = REQUIREMENTS[activeCode];
+    const beltData = progressDoc.belts[activeCode];
+    const isMet = areRequirementsMet(beltData, req);
+    const percentage = calculatePercentage(beltData, req);
+    
+    progressDoc.belts[activeCode].progressPercentage = percentage;
+
+    if (isMet || percentage >= 100) {
+        if (!progressDoc.belts[activeCode].isCompleted) {
+            progressDoc.belts[activeCode].isCompleted = true;
+            progressDoc.belts[activeCode].progressPercentage = 100;
+            progressDoc.belts[activeCode].completedAt = new Date();
+        }
+
+        if (activeCode === 'R') {
+            if (!progressDoc.belts['L']) {
+                 progressDoc.belts['L'] = { activeDayCount: 0, planSessionCount: 0, postCount: 0, shareTipCount: 0, openResourceCount: 0, reflectionCount: 0, recommendationCount: 0, isCompleted: false, progressPercentage: 0 };
+            }
+            progressDoc.belts['L'].isCompleted = true;
+            progressDoc.belts['L'].progressPercentage = 100;
+            progressDoc.belts['L'].completedAt = new Date();
+            progressDoc.markModified('belts.L');
+        }
+    }
+
+    progressDoc.markModified('belts'); 
+    progressDoc.markModified(`belts.${activeCode}`);
+    
+    await progressDoc.save();
+    await syncUserBeltLevel(userId, progressDoc);
+
+    return { 
+        activeCode, 
+        val: progressDoc.belts[activeCode][dbField], 
+        percentage: progressDoc.belts[activeCode].progressPercentage,
+        isCompleted: progressDoc.belts[activeCode].isCompleted
+    };
+};
+
+const updateBeltWithValues = async (userId, updates) => {
+    let progressDoc = await BeltProgress.findOne({ userId });
+    if (!progressDoc) {
+        progressDoc = await BeltProgress.create({ 
+            userId, belts: { W: { activeDayCount: 0, planSessionCount: 0, postCount: 0, shareTipCount: 0, openResourceCount: 0, reflectionCount: 0, recommendationCount: 0, isCompleted: false, progressPercentage: 0 } } 
+        });
+    }
+
+    const activeCode = findActiveBeltCode(progressDoc);
+    if (!progressDoc.belts[activeCode]) {
+        progressDoc.belts[activeCode] = { activeDayCount: 0, planSessionCount: 0, postCount: 0, shareTipCount: 0, openResourceCount: 0, reflectionCount: 0, recommendationCount: 0, isCompleted: false, progressPercentage: 0 };
+    }
+
+    let needsSave = false;
+
+    for (const [key, value] of Object.entries(updates)) {
+        const dbField = FIELD_MAP[key];
+        const reqKey = REQ_MAP[key];
+
+        if (dbField && reqKey) {
+            const target = REQUIREMENTS[activeCode][reqKey] || 0;
+            if (target === 0) continue;
+
+            const currentVal = progressDoc.belts[activeCode][dbField] || 0;
+            if (value > currentVal) {
+                progressDoc.belts[activeCode][dbField] = value;
+                needsSave = true;
+            }
+        }
+    }
+
+    if (needsSave) {
+        const req = REQUIREMENTS[activeCode];
+        const beltData = progressDoc.belts[activeCode];
+        const isMet = areRequirementsMet(beltData, req);
+        const percentage = calculatePercentage(beltData, req);
+
+        progressDoc.belts[activeCode].progressPercentage = percentage;
+
+        if (isMet || percentage >= 100) {
+            if (!progressDoc.belts[activeCode].isCompleted) {
+                progressDoc.belts[activeCode].isCompleted = true;
+                progressDoc.belts[activeCode].progressPercentage = 100;
+                progressDoc.belts[activeCode].completedAt = new Date();
+            }
+        }
+
+        progressDoc.markModified('belts'); 
+        progressDoc.markModified(`belts.${activeCode}`);
+        await progressDoc.save();
+    }
+    
+    await syncUserBeltLevel(userId, progressDoc);
+};
+
+// Get And Heal 
+const getAndHealBeltData = async (userId) => {
+    let progressDoc = await BeltProgress.findOne({ userId });
+    
+    if (!progressDoc) {
+            progressDoc = await BeltProgress.create({ 
+            userId, 
+            belts: { 
+                W: { 
+                    activeDayCount: 0, planSessionCount: 0, postCount: 0, 
+                    shareTipCount: 0, openResourceCount: 0, reflectionCount: 0, 
+                    recommendationCount: 0, isCompleted: false, progressPercentage: 0 
+                } 
+            } 
+        });
+    }
+
+    let hasChanges = false;
+    const responseBelts = {};
+
+    BELT_ORDER.forEach(code => {
+        if (!progressDoc.belts[code]) {
+            if (progressDoc.belts) progressDoc.belts[code] = {};
+        }
+        
+        const saved = progressDoc.belts[code] || {};
+        const req = REQUIREMENTS[code];
+
+        let physicalRequirementsMet = areRequirementsMet(saved, req);
+        let correctPct = calculatePercentage(saved, req);
+
+        if (code === 'L') {
+            const brownBelt = progressDoc.belts['R'];
+            const isBrownDone = brownBelt && brownBelt.isCompleted;
+
+            if (!isBrownDone) {
+                correctPct = 0;
+                saved.isCompleted = false;
+                saved.progressPercentage = 0;
+                if (progressDoc.belts[code].isCompleted) {
+                    progressDoc.belts[code].isCompleted = false;
+                    progressDoc.belts[code].progressPercentage = 0;
+                    hasChanges = true; 
+                }
+                physicalRequirementsMet = false;
+            }
+        }
+
+        if (progressDoc instanceof mongoose.Model) {
+            if ((physicalRequirementsMet || correctPct >= 100) && !saved.isCompleted) {
+                saved.isCompleted = true;
+                saved.progressPercentage = 100;
+                saved.completedAt = saved.completedAt || new Date();
+                hasChanges = true;
+            }
+            else if (!saved.isCompleted && saved.progressPercentage !== correctPct) {
+                saved.progressPercentage = correctPct;
+                hasChanges = true;
+            }
+        }
+
+        responseBelts[code] = {
+            planSessionCount: saved.planSessionCount || 0,
+            activeDayCount: saved.activeDayCount || 0,
+            postCount: saved.postCount || 0,
+            shareTipCount: saved.shareTipCount || 0,
+            openResourceCount: saved.openResourceCount || 0,
+            reflectionCount: saved.reflectionCount || 0,
+            recommendationCount: saved.recommendationCount || 0,
+            isCompleted: saved.isCompleted || false,
+            progressPercentage: saved.progressPercentage || 0, 
+            reqSessionCount: req.session,
+            reqActiveDayCount: req.activeDay,
+            reqPostCount: req.post,
+            reqShareTipCount: req.shareTip,
+            reqResourceCount: req.resource,
+            reqReflectionCount: req.reflection,
+            reqRecommendationCount: req.recommendation,
+        };
+    });
+
+    if (hasChanges && progressDoc instanceof mongoose.Model) {
+        progressDoc.markModified('belts');
+        await progressDoc.save();
+    }
+
+    await syncUserBeltLevel(userId, progressDoc);
+
+    return { success: true, userId, belts: responseBelts };
+};
+
 
 module.exports = (asyncHandler) => {
     const router = express.Router();
-
-   // Daily Check Endpoint
-    router.post('/daily-check', asyncHandler(async (req, res) => {
-        const { userId } = req.body;
-        if (!userId) return res.status(400).json({ success: false, msg: 'User ID is required' });
-
-        const user = await User.findById(userId);
-        if (!user) return res.status(404).json({ success: false, msg: 'User not found' });
-
-        let progressDoc = await BeltProgress.findOne({ userId });
-        if (!progressDoc) {
-            progressDoc = await BeltProgress.create({ userId, belts: {} });
-        }
-
-        let currentTotal = calculateTotalActiveDays(progressDoc);
-
-        const now = new Date();
-        const todayStr = now.toISOString().split('T')[0]; 
-        const lastLoginStr = user.lastLogin ? new Date(user.lastLogin).toISOString().split('T')[0] : null;
-        
-        let shouldUpdate = false;
-
-        if (currentTotal === 0) {
-            currentTotal = 1;
-            shouldUpdate = true;
-        } 
-        else if (lastLoginStr !== todayStr) {
-            currentTotal += 1;
-            shouldUpdate = true;
-        }
-
-        // 5. Execution Phase
-        if (shouldUpdate) {
-            const distDays = distributeCountToBelts(currentTotal, BELT_ACTIVE_DAY_REQ);
-            
-            const beltUpdates = {};
-            BELT_ORDER.forEach(code => {
-                beltUpdates[`belts.${code}.activeDayCount`] = distDays[code];
-            });
-
-            await BeltProgress.updateOne({ userId }, { $set: beltUpdates });
-            
-            user.lastLogin = now;
-            await user.save();
-            
-            console.log(`✅ Active days updated to ${currentTotal} for user ${userId}`);
-        } else {
-             user.lastLogin = now;
-             await user.save();
-        }
-
-        res.json({ success: true, activeDaysCount: currentTotal });
-    }));
 
     router.get('/', asyncHandler(async (req, res) => {
         const { userId } = req.query;
         if (!userId) return res.status(400).json({ success: false, msg: 'User ID is required' });
 
-        let progressDoc = await BeltProgress.findOne({ userId }).lean();
-        if (!progressDoc) progressDoc = await BeltProgress.create({ userId, belts: {} });
+        const data = await getAndHealBeltData(userId);
+        res.json(data);
+    }));
 
-        const totalSessions = await Session.countDocuments({ trainerId: userId });
-        const distSessions = distributeCountToBelts(totalSessions, BELT_SESSION_REQ);
-        const totalRecommendations = calculateTotalRecommendations(progressDoc);
-        const distRecommendations = distributeCountToBelts(totalRecommendations, BELT_RECOMMENDATION_REQ);
-        let totalComments = 0;
-        let totalCreatedPosts = 0;
+    router.post('/update', asyncHandler(async (req, res) => {
+        const { userId, actionType } = req.body; 
+        if (!userId || !actionType) return res.status(400).json({ success: false, msg: 'Missing fields' });
 
-        if (mongoose.Types.ObjectId.isValid(userId)) {
-            const commentAggregation = await Post.aggregate([
-                { $unwind: "$comments" },
-                { $match: { "comments.user": new mongoose.Types.ObjectId(userId) } },
-                { $count: "count" }
-            ]);
-            totalComments = commentAggregation.length > 0 ? commentAggregation[0].count : 0;
-            totalCreatedPosts = await Post.countDocuments({ user: userId });
+        let internalAction = actionType;
+        if (actionType === 'shareTip') internalAction = 'share_tip';
+        if (actionType === 'open_resource') internalAction = 'resource';
+        if (actionType === 'reflection') internalAction = 'reflection';
+
+        const result = await incrementBeltProgress(userId, internalAction);
+
+        res.json({ success: true, msg: 'Progress Updated', data: result });
+    }));
+
+    router.post('/daily-check', asyncHandler(async (req, res) => {
+        const { userId } = req.body;
+        const user = await User.findById(userId);
+        if (!user) return res.status(404).json({ success: false });
+
+        const now = new Date();
+        const todayStr = now.toISOString().split('T')[0];
+        const lastLoginStr = user.lastLogin ? new Date(user.lastLogin).toISOString().split('T')[0] : null;
+
+        if (lastLoginStr !== todayStr) {
+            user.lastLogin = now;
+            await user.save();
+            await incrementBeltProgress(userId, 'active_day');
+            return res.json({ success: true, msg: 'Active day counted' });
         }
-        const distPosts = distributeCountToBelts(totalComments, BELT_POST_REQ);
-        const distShareTips = distributeCountToBelts(totalCreatedPosts, BELT_SHARE_TIP_REQ);
-        const dbUpdates = {};
-
-        BELT_ORDER.forEach(code => {
-            dbUpdates[`belts.${code}.planSessionCount`] = distSessions[code];
-            if (['G', 'B'].includes(code)) dbUpdates[`belts.${code}.postCount`] = distPosts[code];
-            if (['B', 'R'].includes(code)) dbUpdates[`belts.${code}.shareTipCount`] = distShareTips[code];
-        });
-
-        await BeltProgress.updateOne({ userId }, { $set: dbUpdates });
-
-        let updatedDoc = await BeltProgress.findOne({ userId }).lean();
-        if (!updatedDoc) updatedDoc = { belts: {} };
-
-        const responseBelts = {};
-        BELT_ORDER.forEach(code => {
-            let savedBeltData = updatedDoc.belts ? updatedDoc.belts[code] : {};
-            const docData = savedBeltData || {};
-
-            const beltResponse = {
-                planSessionCount: distSessions[code],
-                postCount: distPosts[code],
-                shareTipCount: distShareTips[code],
-                recommendationCount: distRecommendations[code],
-                activeDayCount: docData.activeDayCount || 0,
-                reqSessionCount: BELT_SESSION_REQ[code],
-                reqActiveDayCount: BELT_ACTIVE_DAY_REQ[code],
-                reqPostCount: BELT_POST_REQ[code],
-                reqShareTipCount: BELT_SHARE_TIP_REQ[code],
-                reqResourceCount: BELT_RESOURCE_REQ[code],
-                reqReflectionCount: BELT_REFLECTION_REQ[code],
-                reqRecommendationCount: BELT_RECOMMENDATION_REQ[code],
-                isCompleted: docData.isCompleted || false,
-                progressPercentage: docData.progressPercentage || 0,
-            };
-            if (code === 'W') beltResponse.openResourceCount = docData.openResourceCount || 0;
-
-            responseBelts[code] = beltResponse;
-        });
-
-        res.json({ success: true, userId, belts: responseBelts });
+        res.json({ success: true, msg: 'Already checked in today' });
     }));
 
     router.post('/sync-belt', asyncHandler(async (req, res) => {
-        const { userId, beltColor, planSessionCount, activeDayCount, progressPercentage, openResourceCount } = req.body;
-
-        if (!userId || !beltColor) {
-            return res.status(400).json({ success: false, msg: 'Missing required fields' });
-        }
-
-        const code = getBeltCode(beltColor);
-        if (!code) {
-             return res.status(400).json({ success: false, msg: 'Invalid belt color' });
-        }
-
-        const updateData = {};
-        const updatePath = `belts.${code}`;
-
-        if (planSessionCount !== undefined) updateData[`${updatePath}.planSessionCount`] = planSessionCount;
-        if (activeDayCount !== undefined) updateData[`${updatePath}.activeDayCount`] = activeDayCount;
-        if (progressPercentage !== undefined) {
-            const roundedProgress = Math.round(Number(progressPercentage));
-            updateData[`${updatePath}.progressPercentage`] = roundedProgress;
-            if (roundedProgress >= 100) {
-                updateData[`${updatePath}.isCompleted`] = true;
-            }
-        }
-
-        if (openResourceCount !== undefined) {
-            const incomingVal = Number(openResourceCount);
-            const currentDoc = await BeltProgress.findOne({ userId });
-            const currentVal = currentDoc?.belts?.[code]?.openResourceCount || 0;
-            
-            if (incomingVal > currentVal) {
-                updateData[`${updatePath}.openResourceCount`] = incomingVal;
-            }
-        }
-
-        await BeltProgress.updateOne(
-            { userId }, 
-            { 
-                $set: updateData,
-                $setOnInsert: { userId } 
-            },
-            { upsert: true }
-        );
-
-        res.json({ 
-            success: true, 
-            msg: `Synced ${code} successfully`,
-            data: { beltColor: code, activeDayCount, progressPercentage }
-        });
+        const { userId } = req.body;
+        await incrementBeltProgress(userId, 'session');
+        res.json({ success: true, msg: 'Session counted' });
     }));
 
-
-    router.post('/update', asyncHandler(async (req, res) => {
-        const { userId, beltColor, actionType } = req.body;
-        if (!userId || !actionType) return res.status(400).json({ success: false, msg: 'Missing fields' });
-        if (actionType === 'recommendation') {
-            const currentDoc = await BeltProgress.findOne({ userId }).lean();
-            if (!currentDoc) {
-                await BeltProgress.create({ userId, belts: { Y: { recommendationCount: 1 } } });
-                return res.json({ success: true, msg: 'Recommendation count started' });
-            }
-
-            const currentTotal = calculateTotalRecommendations(currentDoc);
-            const newTotal = currentTotal + 1;
-            const dist = distributeCountToBelts(newTotal, BELT_RECOMMENDATION_REQ);
-
-            await BeltProgress.updateOne(
-                { userId },
-                {
-                    $set: {
-                        'belts.Y.recommendationCount': dist.Y,
-                        'belts.G.recommendationCount': dist.G,
-                        'belts.R.recommendationCount': dist.R,
-                    }
-                }
-            );
-            return res.json({ success: true, msg: 'Recommendation count updated' });
+    router.post('/sync-data', asyncHandler(async (req, res) => {
+        const { userId, metrics } = req.body; 
+        if (!userId) return res.status(400).json({ success: false, msg: 'User ID is required' });
+        if (metrics) {
+            await updateBeltWithValues(userId, metrics);
         }
-
-        if (actionType === 'active_day') {
-            await User.updateOne({ _id: userId }, { $inc: { activeDaysCount: 1 } });
-            return res.json({ success: true, msg: 'Global active day count updated' });
-        }
-
-        const code = getBeltCode(beltColor);
-        const validFields = { 'post': 'postCount', 'description': 'writeShortDescriptionCount', 'share_tip': 'shareTipCount', 'open_resource': 'openResourceCount' };
-        const fieldToUpdate = validFields[actionType];
-        
-        if (fieldToUpdate) {
-             const updatePath = `belts.${code}.${fieldToUpdate}`;
-             await BeltProgress.updateOne({ userId }, { $inc: { [updatePath]: 1 } });
-             return res.json({ success: true, msg: `Updated ${fieldToUpdate}` });
-        }
-        
-        return res.status(400).json({ success: false, msg: 'Invalid action type' });
+        const data = await getAndHealBeltData(userId);
+        res.json(data);
     }));
 
     return router;

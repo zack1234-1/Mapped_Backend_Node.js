@@ -179,17 +179,31 @@ module.exports = (asyncHandler) => {
                 if (!hadReflection && hasNewReflection && session.trainerId) {
                     try {
                         const beltProgress = await BeltProgress.findOne({ userId: session.trainerId });
-                        const greenBelt = beltProgress?.belts?.G;
-                        const currentCount = greenBelt?.writeShortDescriptionCount || 0;
-                        const maxReq = 1; 
-                        
-                        if (currentCount < maxReq) {
-                            await BeltProgress.updateOne(
-                                { userId: session.trainerId },
-                                { $inc: { 'belts.G.writeShortDescriptionCount': 1 } },
-                                { upsert: true }
-                            );
-                            console.log(`✅ Reflection recorded for Green Belt: ${session.trainerId}`);
+                        const belts = beltProgress?.belts || {};
+                        const ORDER = ['W', 'Y', 'G', 'B', 'R', 'L'];
+                        let activeCode = 'W';
+                        for (const code of ORDER) {
+                            const b = belts[code];
+                            if (!b || !b.isCompleted) {
+                                activeCode = code;
+                                break;
+                            }
+                        }
+
+                        if (activeCode === 'G') {
+                            const greenBelt = belts.G;
+                            const currentCount = greenBelt?.reflectionCount || 0;
+                            const maxReq = 1;
+
+                            if (currentCount < maxReq) {
+                                await BeltProgress.updateOne(
+                                    { userId: session.trainerId },
+                                    { $inc: { 'belts.G.reflectionCount': 1 } },
+                                    { upsert: true }
+                                );
+                            }
+                        } else {
+                            console.log(`ℹ️ Reflection ignored for ${session.trainerId} (active belt: ${activeCode})`);
                         }
                     } catch (err) {
                         console.error('Error updating reflection count:', err);

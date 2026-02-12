@@ -65,6 +65,12 @@ const UserSchema = new Schema({
         enum: ['admin', 'instructor', 'trainee'],
         default: 'trainee'
     },
+
+    currentBelt: {
+        type: String,
+        default: 'White' 
+    },
+
     createdAt: {
         type: Date,
         default: Date.now

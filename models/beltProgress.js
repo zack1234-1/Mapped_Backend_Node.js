@@ -24,7 +24,7 @@ const GreenBeltSchema = new Schema({
     planSessionCount: { type: Number, default: 0 },
     activeDayCount: { type: Number, default: 0 },
     recommendationCount: { type: Number, default: 0 },
-    writeShortDescriptionCount: { type: Number, default: 0 },
+    reflectionCount: { type: Number, default: 0 },
     postCount: { type: Number, default: 0 },
     progressPercentage: { type: Number, default: 0 },
     isCompleted: { type: Boolean, default: false }

@@ -295,20 +295,6 @@ router.delete('/:id', async (req, res) => {
 
         await Post.findByIdAndDelete(req.params.id);
 
-        try {
-            const totalCreatedPosts = await Post.countDocuments({ user: userId });
-            const distShareTips = distributeCountToBelts(totalCreatedPosts, BELT_SHARE_TIP_REQ);
-
-            const updateFields = {};
-            updateFields['belts.B.shareTipCount'] = distShareTips['B'] || 0;
-            updateFields['belts.R.shareTipCount'] = distShareTips['R'] || 0;
-
-            await BeltProgress.updateOne({ userId }, { $set: updateFields });
-            console.log(`✅ Updated BeltProgress shareTipCount for user ${userId}:`, updateFields);
-        } catch (updateErr) {
-            console.error('⚠️ Could not update BeltProgress after post delete:', updateErr);
-        }
-
         res.json({ msg: 'Post deleted successfully' });
     } catch (err) {
         console.error('❌ Delete Post Error:', err);

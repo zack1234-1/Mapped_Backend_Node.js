@@ -11,7 +11,17 @@ const cloudinary = require('../config/cloudinary');
 const storage = multer.memoryStorage();
 const upload = multer({ 
     storage: storage, 
-    limits: { fileSize: 10 * 1024 * 1024 } 
+    limits: { 
+        fileSize: 1 * 1024 * 1024, // 1MB per file
+        files: 4 // Maximum 4 files
+    },
+    fileFilter: (req, file, cb) => {
+        // Check file size
+        if (file.size > 1 * 1024 * 1024) {
+            return cb(new Error('File size exceeds 1MB limit'));
+        }
+        cb(null, true);
+    }
 });
 
 // --- HELPER FUNCTION: TRANSFORM RESOURCE ---
@@ -71,6 +81,12 @@ router.post('/', upload.any(), async (req, res) => {
         const user = await User.findById(userId).select('name avatar username');
         if (!user) return res.status(404).json({ msg: 'User not found' });
 
+        // Check if too many files
+        if (req.files && req.files.length > 4) {
+            return res.status(400).json({ msg: 'Maximum 4 images allowed per resource' });
+        }
+
+        // Upload images to Cloudinary
         let imageUrls = [];
         if (req.files && req.files.length > 0) {
             for (const file of req.files) {
@@ -109,16 +125,6 @@ router.post('/', upload.any(), async (req, res) => {
                 .filter(tag => tag.length > 0);
             tags = [...new Set(tags)];
         }
-
-        // Ensure arrays are initialized if missing
-        if (!imageUrls) imageUrls = [];
-        if (!videoUrls) videoUrls = [];
-        if (!linkUrl) linkUrl = "";
-
-        // Ensure arrays are initialized if missing
-        if (!imageUrls) imageUrls = [];
-        if (!videoUrls) videoUrls = [];
-        if (!linkUrl) linkUrl = "";
 
         // Determine Type
         let finalType = 'Text';
@@ -262,91 +268,28 @@ router.delete('/:id', async (req, res) => {
             return res.status(401).json({ msg: 'User not authorized to delete this resource' });
         }
 
+        // Delete associated images from Cloudinary
         if (resource.imageUrls && resource.imageUrls.length > 0) {
-            resource.imageUrls.forEach(imagePath => {
-                // Remove URL prefix to get file path if necessary, or check relative path
-                // This assumes imagePath stored in DB is relative "uploads/..."
-                if (!imagePath.startsWith('http') && fs.existsSync(imagePath)) {
-                    fs.unlinkSync(imagePath);
+            for (const imageUrl of resource.imageUrls) {
+                try {
+                    // Extract public_id from Cloudinary URL
+                    const urlParts = imageUrl.split('/');
+                    const fileName = urlParts[urlParts.length - 1];
+                    const publicId = `resources/${fileName.split('.')[0]}`;
+                    
+                    await cloudinary.uploader.destroy(publicId);
+                    console.log('✅ Image deleted from Cloudinary:', publicId);
+                } catch (cloudinaryError) {
+                    console.error('⚠️  Error deleting image from Cloudinary:', cloudinaryError);
+                    // Continue with deletion even if Cloudinary delete fails
                 }
-            });
+            }
         }
 
         await Resource.findByIdAndDelete(req.params.id);
         res.json({ msg: 'Resource deleted successfully' });
     } catch (err) {
-        console.error('Delete Resource Error:', err);
-        res.status(500).json({ msg: 'Server Error', error: err.message });
-    }
-});
-
-router.post('/:id/view', async (req, res) => {
-    try {
-        const { userId } = req.body;
-        const resourceId = req.params.id;
-
-        if (!userId) return res.status(400).json({ msg: 'Missing userId' });
-        if (!mongoose.Types.ObjectId.isValid(resourceId)) {
-            return res.status(400).json({ msg: 'Invalid resource ID' });
-        }
-
-        const user = await User.findById(userId);
-        if (!user) return res.status(404).json({ msg: 'User not found' });
-
-        // Initialize viewedResources array if not exists
-        if (!user.viewedResources) {
-            user.viewedResources = [];
-        }
-
-        // Add to viewed resources if not already viewed
-        if (!user.viewedResources.includes(resourceId)) {
-            user.viewedResources.push(resourceId);
-            await user.save();
-        }
-
-        // --- UPDATE BELT PROGRESS (White Belt: openResourceCount) ---
-        // Increment the count for White Belt specifically because it's the only one with this metric.
-        // Cap at 3.
-        const progressDoc = await BeltProgress.findOne({ userId: userId });
-        const currentCount = progressDoc?.belts?.W?.openResourceCount || 0;
-
-        if (currentCount < 3) {
-            await BeltProgress.findOneAndUpdate(
-                { userId: userId },
-                { $inc: { 'belts.W.openResourceCount': 1 } },
-                { upsert: true, new: true, setDefaultsOnInsert: true }
-            );
-        }
-
-        res.json({ 
-            success: true, 
-            msg: 'Resource view recorded and progress updated',
-            viewedCount: user.viewedResources.length 
-        });
-    } catch (err) {
-        console.error('Record Resource View Error:', err);
-        res.status(500).json({ msg: 'Server Error', error: err.message });
-    }
-});
-
-// 7. GET USER'S VIEWED RESOURCES (For progress tracking)
-router.get('/user/:userId/viewed', async (req, res) => {
-    try {
-        const { userId } = req.params;
-
-        if (!mongoose.Types.ObjectId.isValid(userId)) {
-            return res.status(400).json({ msg: 'Invalid user ID' });
-        }
-
-        const user = await User.findById(userId).select('viewedResources');
-        if (!user) return res.status(404).json({ msg: 'User not found' });
-
-        res.json({ 
-            success: true, 
-            data: user.viewedResources || [] 
-        });
-    } catch (err) {
-        console.error('Get Viewed Resources Error:', err);
+        console.error('❌ Delete Resource Error:', err);
         res.status(500).json({ msg: 'Server Error', error: err.message });
     }
 });

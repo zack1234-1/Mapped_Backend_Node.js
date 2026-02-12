@@ -18,8 +18,8 @@ const asyncHandler = fn => (req, res, next) => {
 app.get('/health', (req, res) => {
   const mongoState = mongoose.connection.readyState;
   const mongoStatus = mongoState === 1 ? 'connected' : 
-                     mongoState === 2 ? 'connecting' :
-                     mongoState === 3 ? 'disconnecting' : 'disconnected';
+                      mongoState === 2 ? 'connecting' :
+                      mongoState === 3 ? 'disconnecting' : 'disconnected';
   
   res.status(200).json({ 
     status: 'OK', 
@@ -79,7 +79,8 @@ app.get('/', (req, res) => {
       profile: '/api/profile',
       forum: '/api/forum',
       coachbot: '/api/coachbot',
-      support: '/api/support'
+      support: '/api/support',
+      admin: '/api/admin'
     },
     documentation: 'API documentation available at /api-docs (if implemented)'
   });
@@ -194,6 +195,11 @@ app.get('/api', (req, res) => {
         path: '/api/support',
         methods: ['GET', 'POST', 'PUT', 'DELETE'],
         description: 'Support ticket system'
+      },
+      admin: {
+        path: '/api/admin',
+        methods: ['GET', 'DELETE', 'PATCH'],
+        description: 'Admin management for reports and users'
       }
     }
   });
@@ -201,18 +207,16 @@ app.get('/api', (req, res) => {
 
 // Load and use routes with error handling
 try {
-  // User routes
+  // User routes - FIXED: Load as direct router, not function
   const userRoutes = require('./routes/userRoutes');
-  if (typeof userRoutes === 'function') {
-    app.use('/api/users', userRoutes(asyncHandler));
-    console.log('✅ User routes loaded');
-  } else {
-    console.log('⚠️  User routes not a function, using default');
-    app.use('/api/users', (req, res) => res.status(501).json({ error: 'User routes not implemented' }));
-  }
+  app.use('/api/users', userRoutes);
+  console.log('✅ User routes loaded');
 } catch (error) {
   console.error('❌ Failed to load user routes:', error.message);
-  app.use('/api/users', (req, res) => res.status(501).json({ error: 'User routes failed to load' }));
+  app.use('/api/users', (req, res) => res.status(501).json({ 
+    error: 'User routes failed to load',
+    details: error.message 
+  }));
 }
 
 try {
@@ -336,14 +340,29 @@ try {
 }
 
 // ✅ SUPPORT ROUTES - ADDED
-try {
-  // Support routes
+try 
+{
   const supportRoutes = require('./routes/supportRoutes');
   app.use('/api/support', supportRoutes);
   console.log('✅ Support routes loaded');
 } catch (error) {
   console.error('❌ Failed to load support routes:', error.message);
   app.use('/api/support', (req, res) => res.status(501).json({ error: 'Support routes failed to load' }));
+}
+
+try {
+  // Admin Management routes
+  const adminRoutes = require('./routes/adminRoutes');
+  if (typeof adminRoutes === 'function') {
+    app.use('/api/admin', adminRoutes(asyncHandler));
+    console.log('✅ Admin Management routes loaded');
+  } else {
+    console.log('⚠️  Admin routes not a function, using default');
+    app.use('/api/admin', (req, res) => res.status(501).json({ error: 'Admin routes not implemented' }));
+  }
+} catch (error) {
+  console.error('❌ Failed to load admin routes:', error.message);
+  app.use('/api/admin', (req, res) => res.status(501).json({ error: 'Admin routes failed to load' }));
 }
 
 // FIXED: 404 handler for undefined API routes - Using regex instead of wildcard
@@ -363,6 +382,7 @@ app.use(/^\/api\/.+$/, (req, res) => {
       '/api/forum',
       '/api/coachbot',
       '/api/support',
+      '/api/admin',
       '/health',
       '/api/test',
       '/api/test-trainee'

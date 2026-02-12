@@ -65,6 +65,23 @@ const UserSchema = new Schema({
         enum: ['admin', 'instructor', 'trainee'],
         default: 'trainee'
     },
+    
+    // --- NEW FIELDS FOR OTP RESET ---
+    resetPasswordToken: {
+        type: String,
+        default: null
+    },
+    resetPasswordExpires: {
+        type: Date,
+        default: null
+    },
+
+    isBlocked: {
+        type: Boolean,
+        default: false
+    },
+    // --------------------------------
+
 
     currentBelt: {
         type: String,
@@ -84,13 +101,14 @@ const UserSchema = new Schema({
 // Indexes
 UserSchema.index({ name: 1 });
 UserSchema.index({ role: 1 });
+UserSchema.index({ email: 1 }); // Important for fast lookups during reset
 UserSchema.index({ googleId: 1 }, { sparse: true });
 UserSchema.index({ facebookId: 1 }, { sparse: true });
 
-// Pre-save middleware - FIXED VERSION
+// Pre-save middleware - hashes password and updates timestamp
 UserSchema.pre('save', async function(next) {
     try {
-        // Only hash password if it exists and is modified
+        // Only hash password if it exists and is modified (works for registration & reset)
         if (this.password && this.isModified('password')) {
             const salt = await bcrypt.genSalt(10);
             const hashedPassword = await bcrypt.hash(this.password, salt);
@@ -98,7 +116,6 @@ UserSchema.pre('save', async function(next) {
         }
         this.updatedAt = Date.now();
         
-        // If next exists (for Mongoose), call it
         if (typeof next === 'function') {
             next();
         }
@@ -111,16 +128,14 @@ UserSchema.pre('save', async function(next) {
     }
 });
 
-// Update timestamp on update
-UserSchema.pre('findOneAndUpdate', function(next) {
-    this.set({ updatedAt: Date.now() });
-    next();
-});
-
 // Method to compare passwords
 UserSchema.methods.verifyPassword = async function(enteredPassword) {
     if (!this.password) return false;
     return await bcrypt.compare(enteredPassword, this.password);
+};
+
+UserSchema.methods.isUserBlocked = function() {
+    return this.isBlocked === true;
 };
 
 // Virtual for full name
@@ -132,6 +147,8 @@ UserSchema.virtual('fullName').get(function() {
 UserSchema.set('toJSON', {
     transform: function(doc, ret) {
         delete ret.password;
+        delete ret.resetPasswordToken; // Also hide OTP token from frontend responses
+        delete ret.resetPasswordExpires;
         return ret;
     }
 });

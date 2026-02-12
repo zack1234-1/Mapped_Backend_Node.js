@@ -82,6 +82,12 @@ const UserSchema = new Schema({
     },
     // --------------------------------
 
+
+    currentBelt: {
+        type: String,
+        default: 'White' 
+    },
+
     createdAt: {
         type: Date,
         default: Date.now

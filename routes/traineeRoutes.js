@@ -1,19 +1,23 @@
 const express = require('express');
 const Trainee = require('../models/trainee');
-const User = require('../models/User'); // Import User model to support User updates
+const User = require('../models/User');
+const multer = require('multer');
+const cloudinary = require('../config/cloudinary');
+const fs = require('fs');
+const path = require('path');
 
-// Helper function to capitalize the first letter and lowercase the rest (Title Case)
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage, limits: { fileSize: 5 * 1024 * 1024 } });
+
 const toTitleCase = (str) => {
     if (!str) return str;
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 };
 
 
-// NEW HELPER: Formats date to YYYY-MM-DD using LOCAL TIME (Fixes the -1 day bug)
 const formatDate = (date) => {
     if (!date) return null;
     const d = new Date(date);
-    // This gets the year, month, and day based on your server's/laptop's timezone
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
@@ -24,11 +28,12 @@ module.exports = (asyncHandler) => {
     const router = express.Router();
 
     // POST /api/trainee - Create new trainee
-    router.post('/', asyncHandler(async (req, res, next) => {
+    router.post('/', upload.single('image'), asyncHandler(async (req, res, next) => {
         console.log('=== TRAINEE CREATE REQUEST START ===');
         console.log('📥 Received request body:', req.body);
+        if (req.file) console.log('📁 Received file:', req.file.originalname);
 
-        let { // Use 'let' because we will reassign belt and gender
+        let { 
             trainerId,
             name,
             belt,
@@ -46,7 +51,6 @@ module.exports = (asyncHandler) => {
             competency
         } = req.body;
 
-        // 1. Validate required fields
         if (!trainerId || !name || !belt || !dateOfBirth || !gender || !phone || !email || !address || !guardianName || !guardianContact || !guardianAddress) {
             console.log('❌ Missing required fields');
             return res.status(400).json({
@@ -55,9 +59,34 @@ module.exports = (asyncHandler) => {
             });
         }
 
-        // 2. APPLY CASE FIX: Convert belt and gender to Title Case for Mongoose validation
         belt = toTitleCase(belt);
         gender = toTitleCase(gender);
+        if (req.file) {
+            try {
+                console.log('☁️ Uploading image to Cloudinary (Stream)...');
+                const uploadResult = await new Promise((resolve, reject) => {
+                    const uploadStream = cloudinary.uploader.upload_stream(
+                        { 
+                            folder: 'trainees',
+                            use_filename: true,
+                            unique_filename: false
+                        },
+                        (error, result) => {
+                            if (error) reject(error);
+                            else resolve(result);
+                        }
+                    );
+                    uploadStream.end(req.file.buffer);
+                });
+                
+                console.log('✅ Cloudinary Upload Success:', uploadResult.secure_url);
+                image = uploadResult.secure_url;
+                
+            } catch (uploadErr) {
+                console.error('❌ Cloudinary Upload Failed:', uploadErr);
+                return res.status(500).json({ success: false, msg: 'Image upload failed', error: uploadErr.message });
+            }
+        }
 
         try {
             console.log('1. Checking for existing trainee with email:', email);
@@ -93,12 +122,8 @@ module.exports = (asyncHandler) => {
                 image: image || null
             });
 
-            console.log('3. Trainee object created:', trainee);
-
-            console.log('4. Saving trainee to database...');
             await trainee.save();
             
-            console.log('✅ Trainee saved successfully with ID:', trainee._id);
             
             return res.status(201).json({ 
                 success: true,
@@ -108,20 +133,15 @@ module.exports = (asyncHandler) => {
                     name: trainee.name,
                     email: trainee.email,
                     belt: trainee.belt,
-                    dateOfBirth: formatDate(trainee.dateOfBirth), // <--- MODIFIED HERE
+                    dateOfBirth: formatDate(trainee.dateOfBirth), 
                     gender: trainee.gender
                 }
             });
             
         } catch (err) {
-            console.error('💥 ERROR in trainee creation:');
-            console.error('Error name:', err.name);
-            console.error('Error message:', err.message);
             
-            // Handle different types of errors
             if (err.name === 'ValidationError') {
                 const errors = Object.values(err.errors).map(e => e.message);
-                console.error('Validation errors:', errors);
                 return res.status(400).json({ 
                     success: false,
                     msg: 'Validation Error', 
@@ -152,26 +172,21 @@ module.exports = (asyncHandler) => {
         }
     }));
 
-    // --- REST OF THE ROUTES (GET, PUT, DELETE) ---
-
-    // GET /api/trainee - Get all trainees
     router.get('/', asyncHandler(async (req, res) => {
         console.log('📥 GET request for all trainees');
         
         try {
-            // Added .lean() to convert Mongoose Docs to plain JS objects so we can modify dateOfBirth
+            
             const trainees = await Trainee.find({})
                 .sort({ createdAt: -1 })
                 .select('-__v')
                 .lean(); 
-            
-            console.log(`✅ Found ${trainees.length} trainees`);
+        
 
-            // Map results to format date
             const formattedTrainees = trainees.map(t => ({
                 ...t,
                 id: t._id,
-                dateOfBirth: formatDate(t.dateOfBirth) // <--- MODIFIED HERE
+                dateOfBirth: formatDate(t.dateOfBirth) 
             }));
             
             res.json({
@@ -229,12 +244,40 @@ module.exports = (asyncHandler) => {
     }));
 
     // PUT /api/trainee/:id - Update trainee
-    router.put('/:id', asyncHandler(async (req, res, next) => {
+    router.put('/:id', upload.single('image'), asyncHandler(async (req, res, next) => {
         const traineeId = req.params.id;
         console.log('📥 PUT request for trainee ID:', traineeId);
         console.log('Update data:', req.body);
+        if (req.file) console.log('📁 Received file override:', req.file.originalname);
+
+        // Handle Image Upload for Update
+        if (req.file) {
+            try {
+                console.log('☁️ Uploading new image to Cloudinary (Stream)...');
+                 const uploadResult = await new Promise((resolve, reject) => {
+                    const uploadStream = cloudinary.uploader.upload_stream(
+                        { 
+                            folder: 'trainees',
+                            use_filename: true,
+                            unique_filename: false
+                        },
+                        (error, result) => {
+                            if (error) reject(error);
+                            else resolve(result);
+                        }
+                    );
+                    uploadStream.end(req.file.buffer);
+                });
+
+                console.log('✅ Cloudinary Upload Success:', uploadResult.secure_url);
+                req.body.image = uploadResult.secure_url;
+
+            } catch (uploadErr) {
+                console.error('❌ Cloudinary Upload Failed:', uploadErr);
+                return res.status(500).json({ success: false, msg: 'Image upload failed', error: uploadErr.message });
+            }
+        }
         
-        // 3. APPLY CASE FIX: Format belt and gender in the update body if present
         if (req.body.belt) {
             req.body.belt = toTitleCase(req.body.belt);
         }
@@ -243,13 +286,12 @@ module.exports = (asyncHandler) => {
         }
 
         try {
-            // Check if email is being updated and if it already exists
             if (req.body.email) {
-                req.body.email = req.body.email.toLowerCase(); // Ensure email is lowercased for check
+                req.body.email = req.body.email.toLowerCase(); 
                 
                 const existingTrainee = await Trainee.findOne({ 
                     email: req.body.email,
-                    _id: { $ne: traineeId } // Exclude current trainee
+                    _id: { $ne: traineeId }
                 });
                 
                 if (existingTrainee) {
@@ -261,25 +303,22 @@ module.exports = (asyncHandler) => {
                 }
             }
             
-            // Added .lean()
             let trainee = await Trainee.findByIdAndUpdate(
                 traineeId,
                 req.body,
                 { 
-                    new: true, // Return updated document
-                    runValidators: true // Run model validations (important for belt/gender fix)
+                    new: true, 
+                    runValidators: true 
                 }
             ).select('-__v').lean();
             
-            // Fallback: If not found in Trainee, try updating User
             if (!trainee) {
                 console.log('⚠️ Trainee not found in Trainee collection, trying User collection for ID:', traineeId);
                 
-                // Allow user update (specifically activeDaysCount or other common fields)
                 const user = await User.findByIdAndUpdate(
                     traineeId,
                     req.body,
-                    { new: true, runValidators: false } // User model might strict validation if we pass belt/etc
+                    { new: true, runValidators: false } 
                 ).select('-password -__v').lean();
 
                 if (user) {
@@ -290,7 +329,6 @@ module.exports = (asyncHandler) => {
                         data: {
                             ...user,
                             id: user._id,
-                            // User might not have dateOfBirth, handle safely
                             dateOfBirth: user.dateOfBirth ? formatDate(user.dateOfBirth) : null
                         }
                     });
@@ -302,12 +340,10 @@ module.exports = (asyncHandler) => {
                     msg: 'Trainee not found'
                 });
             }
-
-            // Format updated trainee date
             const formattedTrainee = {
                 ...trainee,
                 id: trainee._id,
-                dateOfBirth: formatDate(trainee.dateOfBirth) // <--- MODIFIED HERE
+                dateOfBirth: formatDate(trainee.dateOfBirth) 
             };
             
             console.log('✅ Trainee updated successfully:', trainee.name);
@@ -339,7 +375,6 @@ module.exports = (asyncHandler) => {
         }
     }));
 
-    // DELETE /api/trainee/:id - Delete trainee
     router.delete('/:id', asyncHandler(async (req, res) => {
         const traineeId = req.params.id;
         console.log('📥 DELETE request for trainee ID:', traineeId);

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Resource = require('../models/resource');
 const User = require('../models/User'); 
+const BeltProgress = require('../models/beltProgress'); // Import BeltProgress
 const multer = require('multer');
 const mongoose = require('mongoose');
 const cloudinary = require('../config/cloudinary');
@@ -10,7 +11,17 @@ const cloudinary = require('../config/cloudinary');
 const storage = multer.memoryStorage();
 const upload = multer({ 
     storage: storage, 
-    limits: { fileSize: 10 * 1024 * 1024 } 
+    limits: { 
+        fileSize: 1 * 1024 * 1024, // 1MB per file
+        files: 4 // Maximum 4 files
+    },
+    fileFilter: (req, file, cb) => {
+        // Check file size
+        if (file.size > 1 * 1024 * 1024) {
+            return cb(new Error('File size exceeds 1MB limit'));
+        }
+        cb(null, true);
+    }
 });
 
 // --- HELPER FUNCTION: TRANSFORM RESOURCE ---
@@ -70,6 +81,11 @@ router.post('/', upload.any(), async (req, res) => {
         const user = await User.findById(userId).select('name avatar username');
         if (!user) return res.status(404).json({ msg: 'User not found' });
 
+        // Check if too many files
+        if (req.files && req.files.length > 4) {
+            return res.status(400).json({ msg: 'Maximum 4 images allowed per resource' });
+        }
+
         // Upload images to Cloudinary
         let imageUrls = [];
         if (req.files && req.files.length > 0) {
@@ -109,11 +125,6 @@ router.post('/', upload.any(), async (req, res) => {
                 .filter(tag => tag.length > 0);
             tags = [...new Set(tags)];
         }
-
-        // Ensure arrays are initialized if missing
-        if (!imageUrls) imageUrls = [];
-        if (!videoUrls) videoUrls = [];
-        if (!linkUrl) linkUrl = "";
 
         // Ensure arrays are initialized if missing
         if (!imageUrls) imageUrls = [];
@@ -262,20 +273,28 @@ router.delete('/:id', async (req, res) => {
             return res.status(401).json({ msg: 'User not authorized to delete this resource' });
         }
 
+        // Delete associated images from Cloudinary
         if (resource.imageUrls && resource.imageUrls.length > 0) {
-            resource.imageUrls.forEach(imagePath => {
-                // Remove URL prefix to get file path if necessary, or check relative path
-                // This assumes imagePath stored in DB is relative "uploads/..."
-                if (!imagePath.startsWith('http') && fs.existsSync(imagePath)) {
-                    fs.unlinkSync(imagePath);
+            for (const imageUrl of resource.imageUrls) {
+                try {
+                    // Extract public_id from Cloudinary URL
+                    const urlParts = imageUrl.split('/');
+                    const fileName = urlParts[urlParts.length - 1];
+                    const publicId = `resources/${fileName.split('.')[0]}`;
+                    
+                    await cloudinary.uploader.destroy(publicId);
+                    console.log('✅ Image deleted from Cloudinary:', publicId);
+                } catch (cloudinaryError) {
+                    console.error('⚠️  Error deleting image from Cloudinary:', cloudinaryError);
+                    // Continue with deletion even if Cloudinary delete fails
                 }
-            });
+            }
         }
 
         await Resource.findByIdAndDelete(req.params.id);
         res.json({ msg: 'Resource deleted successfully' });
     } catch (err) {
-        console.error('Delete Resource Error:', err);
+        console.error('❌ Delete Resource Error:', err);
         res.status(500).json({ msg: 'Server Error', error: err.message });
     }
 });

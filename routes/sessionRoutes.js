@@ -1,13 +1,11 @@
 const express = require('express');
 const Session = require('../models/session');
-
-// Helper: Parse Flutter Date String "dd/mm/yyyy"
+const BeltProgress = require('../models/beltProgress');
 const parseFlutterDate = (dateString) => {
     try {
         if (!dateString) return null;
         if (dateString.includes('/')) {
             const [day, month, year] = dateString.split('/');
-            // Create UTC date to ensure day stability
             return new Date(Date.UTC(year, month - 1, day));
         }
         return new Date(dateString);
@@ -20,9 +18,7 @@ const parseFlutterDate = (dateString) => {
 module.exports = (asyncHandler) => {
     const router = express.Router();
 
-    // ==========================================
-    // 1. POST /api/session - Create new session
-    // ==========================================
+  //1.CREATE SESSION
     router.post('/', asyncHandler(async (req, res, next) => {
         console.log('📥 Received request body:', req.body);
 
@@ -50,7 +46,7 @@ module.exports = (asyncHandler) => {
                 trainerId, trainer, venue,
                 date: parsedDate,
                 totalTrainees: parseInt(totalTrainees),
-                duration, // Saved purely as string (e.g. "60 min")
+                duration, 
                 level, sessionNo, ageRange,
                 riskAssessment, resources, othersInvolved,
                 goals, warmup, activity, cooldown, contingencies, reflection
@@ -96,8 +92,6 @@ module.exports = (asyncHandler) => {
                 
                 const sessionDate = new Date(session.date);
                 const sessStr = sessionDate.toISOString().split('T')[0];
-
-                // --- FORMAT DATE FOR UI ---
                 const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
                 session.uiDate = `${days[sessionDate.getUTCDay()]}, ${months[sessionDate.getUTCMonth()]} ${sessionDate.getUTCDate()}, ${sessionDate.getUTCFullYear()}`;
@@ -128,12 +122,11 @@ module.exports = (asyncHandler) => {
         }
     }));
 
-    // ==========================================
-    // 3. PUT /api/session/:id - Update session
-    // ==========================================
+
+    // 3. Update session
     router.put('/:id', asyncHandler(async (req, res, next) => {
         const { 
-            trainer, date, venue, totalTrainees, duration, // Core fields
+            trainer, date, venue, totalTrainees, duration, 
             level, sessionNo, ageRange,
             riskAssessment, resources, othersInvolved,
             goals, warmup, activity, cooldown, contingencies,
@@ -147,14 +140,13 @@ module.exports = (asyncHandler) => {
             let session = await Session.findById(req.params.id);
             if (!session) return res.status(404).json({ success: false, msg: 'Session not found' });
 
-            // Update Fields
+
             session.trainer = trainer;
             session.date = parsedDate;
             session.venue = venue;
             session.totalTrainees = parseInt(totalTrainees);
-            if (duration) session.duration = duration;
 
-            // Optional Updates
+            if (duration) session.duration = duration;
             if (level) session.level = level;
             if (sessionNo) session.sessionNo = sessionNo;
             if (ageRange) session.ageRange = ageRange;
@@ -166,7 +158,44 @@ module.exports = (asyncHandler) => {
             if (warmup) session.warmup = warmup;
             if (activity) session.activity = activity;
             if (cooldown) session.cooldown = cooldown;
-            if (reflection) session.reflection = reflection;
+            if (reflection !== undefined) {
+
+                const hadReflection = session.reflection && (
+                    (session.reflection.rating && session.reflection.rating > 0) ||
+                    (session.reflection.highlights && session.reflection.highlights.trim().length > 0) ||
+                    (session.reflection.improvements && session.reflection.improvements.trim().length > 0) ||
+                    (session.reflection.actionItems && session.reflection.actionItems.length > 0)
+                );
+                
+                session.reflection = reflection;
+
+                const hasNewReflection = reflection && (
+                    (reflection.rating && reflection.rating > 0) ||
+                    (reflection.highlights && reflection.highlights.trim().length > 0) ||
+                    (reflection.improvements && reflection.improvements.trim().length > 0) ||
+                    (reflection.actionItems && reflection.actionItems.length > 0)
+                );
+                
+                if (!hadReflection && hasNewReflection && session.trainerId) {
+                    try {
+                        const beltProgress = await BeltProgress.findOne({ userId: session.trainerId });
+                        const greenBelt = beltProgress?.belts?.G;
+                        const currentCount = greenBelt?.writeShortDescriptionCount || 0;
+                        const maxReq = 1; 
+                        
+                        if (currentCount < maxReq) {
+                            await BeltProgress.updateOne(
+                                { userId: session.trainerId },
+                                { $inc: { 'belts.G.writeShortDescriptionCount': 1 } },
+                                { upsert: true }
+                            );
+                            console.log(`✅ Reflection recorded for Green Belt: ${session.trainerId}`);
+                        }
+                    } catch (err) {
+                        console.error('Error updating reflection count:', err);
+                    }
+                }
+            }
 
             await session.save();
             res.status(200).json({ success: true, msg: 'Updated', data: session });

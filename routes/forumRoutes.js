@@ -1,6 +1,21 @@
 const express = require('express');
 const router = express.Router();
 const Post = require('../models/Post');
+const BeltProgress = require('../models/beltProgress');
+const BELT_ORDER = ['W', 'Y', 'G', 'B', 'R', 'L'];
+const BELT_SHARE_TIP_REQ = { 'W': 0, 'Y': 0, 'G': 0, 'B': 1, 'R': 3, 'L': 0 };
+
+const distributeCountToBelts = (totalCount, requirements) => {
+    let remaining = totalCount;
+    const distribution = {};
+    BELT_ORDER.forEach(code => {
+        const req = requirements[code] || 0;
+        const count = Math.min(Math.max(remaining, 0), req);
+        distribution[code] = count;
+        remaining -= req;
+    });
+    return distribution;
+};
 const User = require('../models/User');
 const multer = require('multer');
 const mongoose = require('mongoose');
@@ -8,10 +23,23 @@ const cloudinary = require('../config/cloudinary');
 
 // --- MULTER SETUP (Memory storage for Cloudinary) ---
 const storage = multer.memoryStorage();
-const upload = multer({ storage: storage, limits: { fileSize: 5 * 1024 * 1024 } });
+const upload = multer({ 
+    storage: storage, 
+    limits: { 
+        fileSize: 1 * 1024 * 1024, // 1MB per file
+        files: 4 // Maximum 4 files
+    },
+    fileFilter: (req, file, cb) => {
+        // Check file size
+        if (file.size > 1 * 1024 * 1024) {
+            return cb(new Error('File size exceeds 1MB limit'));
+        }
+        cb(null, true);
+    }
+});
 
 // 1. CREATE POST
-router.post('/', upload.array('postImages', 10), async (req, res) => {
+router.post('/', upload.array('postImages', 4), async (req, res) => {
     try {
         const userId = req.body.userId; 
         if (!userId) {
@@ -25,6 +53,11 @@ router.post('/', upload.array('postImages', 10), async (req, res) => {
 
         const user = await User.findById(userId).select('-password');
         if (!user) return res.status(404).json({ msg: 'User not found' });
+
+        // Check if too many files
+        if (req.files && req.files.length > 4) {
+            return res.status(400).json({ msg: 'Maximum 4 images allowed per post' });
+        }
 
         // Upload images to Cloudinary
         let imageUrls = [];
@@ -279,6 +312,21 @@ router.delete('/:id', async (req, res) => {
         }
 
         await Post.findByIdAndDelete(req.params.id);
+
+        try {
+            const totalCreatedPosts = await Post.countDocuments({ user: userId });
+            const distShareTips = distributeCountToBelts(totalCreatedPosts, BELT_SHARE_TIP_REQ);
+
+            const updateFields = {};
+            updateFields['belts.B.shareTipCount'] = distShareTips['B'] || 0;
+            updateFields['belts.R.shareTipCount'] = distShareTips['R'] || 0;
+
+            await BeltProgress.updateOne({ userId }, { $set: updateFields });
+            console.log(`✅ Updated BeltProgress shareTipCount for user ${userId}:`, updateFields);
+        } catch (updateErr) {
+            console.error('⚠️ Could not update BeltProgress after post delete:', updateErr);
+        }
+
         res.json({ msg: 'Post deleted successfully' });
     } catch (err) {
         console.error('❌ Delete Post Error:', err);

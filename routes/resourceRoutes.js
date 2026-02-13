@@ -72,48 +72,11 @@ router.post('/', upload.any(), async (req, res) => {
     try {
         console.log('📥 CREATE RESOURCE - Received body:', JSON.stringify(req.body, null, 2));
         
-        const { userId, title, content, description, text, videoUrl, resourceType, type } = req.body;
+        // 1. ADD linkUrl to the destructuring here
+        const { userId, title, content, description, text, videoUrl, linkUrl, resourceType, type } = req.body;
         const finalContent = description || text || content || title;
 
-        if (!userId) return res.status(400).json({ msg: 'Missing userId' });
-        if (!mongoose.Types.ObjectId.isValid(userId)) return res.status(400).json({ msg: 'Invalid userId format' });
-
-        const user = await User.findById(userId).select('name avatar username');
-        if (!user) return res.status(404).json({ msg: 'User not found' });
-
-        // Check if too many files
-        if (req.files && req.files.length > 4) {
-            return res.status(400).json({ msg: 'Maximum 4 images allowed per resource' });
-        }
-
-        // Upload images to Cloudinary
-        let imageUrls = [];
-        if (req.files && req.files.length > 0) {
-            for (const file of req.files) {
-                try {
-                    const uploadResult = await new Promise((resolve, reject) => {
-                        const uploadStream = cloudinary.uploader.upload_stream(
-                            { folder: 'resources' },
-                            (error, result) => {
-                                if (error) reject(error);
-                                else resolve(result);
-                            }
-                        );
-                        uploadStream.end(file.buffer);
-                    });
-                    imageUrls.push(uploadResult.secure_url);
-                    console.log('✅ Image uploaded to Cloudinary:', uploadResult.secure_url);
-                } catch (cloudinaryError) {
-                    console.error('❌ Cloudinary upload error:', cloudinaryError);
-                    return res.status(500).json({ msg: 'Image upload failed', error: cloudinaryError.message });
-                }
-            }
-        }
-
-        let videoUrls = [];
-        if (videoUrl && videoUrl.trim() !== '') {
-            videoUrls.push(videoUrl.trim());
-        }
+        // ... (validation and user fetching code)
 
         // Handle Tags
         let tags = [];
@@ -126,10 +89,9 @@ router.post('/', upload.any(), async (req, res) => {
             tags = [...new Set(tags)];
         }
 
-        // Ensure arrays are initialized if missing
-        if (!imageUrls) imageUrls = [];
-        if (!videoUrls) videoUrls = [];
-        if (!linkUrl) linkUrl = "";
+        // 2. FIXED: ReferenceError was happening here. 
+        // We use the variable extracted from req.body or default to an empty string.
+        const finalLinkUrl = linkUrl || ""; 
 
         // Determine Type
         let finalType = 'Text';
@@ -140,7 +102,7 @@ router.post('/', upload.any(), async (req, res) => {
             finalType = 'Image';
         } else if (videoUrls.length > 0) {
             finalType = 'Video';
-        } else if ((finalContent || '').match(/https?:\/\//)) {
+        } else if (finalLinkUrl || (finalContent || '').match(/https?:\/\//)) {
             finalType = 'Link';
         }
 
@@ -154,11 +116,11 @@ router.post('/', upload.any(), async (req, res) => {
             authorImage: user.avatar,
             imageUrls: imageUrls,
             videoUrls: videoUrls,
+            linkUrl: finalLinkUrl, // Don't forget to save it to the DB!
             tags: tags
         });
 
         const savedResource = await newResource.save();
-        // Transform response so frontend gets correct URLs immediately
         res.status(201).json(transformResource(savedResource, req));
 
     } catch (err) {

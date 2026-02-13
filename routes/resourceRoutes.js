@@ -72,7 +72,7 @@ router.post('/', upload.any(), async (req, res) => {
     try {
         console.log('📥 CREATE RESOURCE - Received body:', JSON.stringify(req.body, null, 2));
         
-        const { userId, title, content, description, text, videoUrl, resourceType, type } = req.body;
+        const { userId, title, content, description, text, videoUrl, resourceType, type, linkUrl } = req.body;
         const finalContent = description || text || content || title;
 
         if (!userId) return res.status(400).json({ msg: 'Missing userId' });
@@ -153,7 +153,8 @@ router.post('/', upload.any(), async (req, res) => {
             authorImage: user.avatar,
             imageUrls: imageUrls,
             videoUrls: videoUrls,
-            tags: tags
+            tags: tags,
+            linkUrl: linkUrl || ''   // ✅ store the provided link
         });
 
         const savedResource = await newResource.save();

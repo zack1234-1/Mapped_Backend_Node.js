@@ -4,8 +4,6 @@ const router = express.Router();
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
-const { Resend } = require('resend');
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Create transporter for email
 const transporter = nodemailer.createTransport({
@@ -179,31 +177,62 @@ router.post('/google-register', asyncHandler(async (req, res) => {
   });
 }));
 
-  // 1. FORGOT PASSWORD - Generate and Email OTP
-  router.post('/forgot-password', async (req, res) => {
-    const { email } = req.body;
-    try {
-      const user = await User.findOne({ email });
-      if (!user) return res.status(404).json({ success: false, msg: "User not found" });
+// 5. FORGOT PASSWORD
+router.post('/forgot-password', asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      msg: 'Email is required'
+    });
+  }
 
-      // Generate 4-digit OTP
-      const otp = Math.floor(1000 + Math.random() * 9000).toString();
-      user.resetPasswordToken = otp;
-      user.resetPasswordExpires = Date.now() + 600000; // 10 minutes
-      await user.save();
+  const user = await User.findOne({ email });
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      msg: 'User not found'
+    });
+  }
 
-      await resend.emails.send({
-        from: 'Mapped Support <onboarding@resend.dev>',
-        to: email,
-        subject: 'Your Password Reset Code',
-        html: `<h3>Your reset code is: <strong>${otp}</strong></h3><p>Valid for 10 minutes.</p>`
-      });
+  // Generate 4-digit OTP
+  const otp = Math.floor(1000 + Math.random() * 9000).toString();
+  user.resetPasswordToken = otp;
+  user.resetPasswordExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+  await user.save();
 
-      res.json({ success: true, msg: "OTP sent to email" });
-    } catch (err) {
-      res.status(500).json({ success: false, msg: "Server error" });
-    }
-  });
+  try {
+    await sendEmail({
+      email: user.email,
+      subject: 'Your Password Reset Code',
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 10px; max-width: 500px;">
+          <h2 style="color: #333;">Password Reset Request</h2>
+          <p>Use the following 4-digit code to reset your password. Valid for 10 minutes.</p>
+          <div style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #4CAF50; text-align: center; padding: 20px; background: #f9f9f9;">
+            ${otp}
+          </div>
+        </div>
+      `
+    });
+    
+    res.json({
+      success: true,
+      msg: 'Code sent to email'
+    });
+  } catch (error) {
+    // Reset token if email fails
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+    await user.save();
+    
+    res.status(500).json({
+      success: false,
+      msg: 'Email could not be sent'
+    });
+  }
+}));
 
 // 6. VERIFY OTP
 router.post('/verify-otp', asyncHandler(async (req, res) => {
@@ -228,27 +257,36 @@ router.post('/verify-otp', asyncHandler(async (req, res) => {
   });
 }));
 
-// 2. RESET PASSWORD - Verify OTP and Update Password
-router.post('/reset-password', async (req, res) => {
-  const { email, otp, newPassword } = req.body;
-  try {
-    const user = await User.findOne({
-      email,
-      resetPasswordToken: otp,
-      resetPasswordExpires: { $gt: Date.now() }
-    });
+router.post('/reset-password', asyncHandler(async (req, res) => {
+  let { email, otp, newPassword } = req.body;
 
-    if (!user) return res.status(400).json({ success: false, msg: "Invalid or expired OTP" });
-
-    user.password = newPassword; // Ensure your User model hashes this on .save()
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpires = undefined;
-    await user.save();
-
-    res.json({ success: true, msg: "Password updated successfully" });
-  } catch (err) {
-    res.status(500).json({ success: false, msg: "Update failed" });
+  // Defensive Check: If email is an object, extract the string
+  if (typeof email === 'object' && email.email) {
+    email = email.email;
   }
-});
+
+  const user = await User.findOne({
+    email: email, // Now guaranteed to be a string
+    resetPasswordToken: otp,
+    resetPasswordExpires: { $gt: Date.now() }
+  });
+
+  if (!user) {
+    return res.status(400).json({
+      success: false,
+      msg: 'Session expired or invalid code'
+    });
+  }
+
+  user.password = newPassword;
+  user.resetPasswordToken = undefined;
+  user.resetPasswordExpires = undefined;
+  await user.save();
+
+  res.json({
+    success: true,
+    msg: 'Password reset successful'
+  });
+}));
 
 module.exports = router;

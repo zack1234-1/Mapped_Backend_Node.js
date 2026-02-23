@@ -46,43 +46,43 @@ async function analyzeSessionHistory(userId) {
             hasHistory: true,
             totalSessions: sessions.length,
             recentSessionsCount: recentSessions.length,
-            
+
             // Temporal analysis
             lastSessionDate: lastSession.date,
             daysSinceLastSession: Math.floor(
                 (new Date() - new Date(lastSession.date)) / (1000 * 60 * 60 * 24)
             ),
-            
+
             // Session characteristics
             averageSessionDuration: calculateAverage(sessions, 'duration'),
             typicalTraineeCount: Math.round(calculateAverage(sessions, 'totalTrainees')),
-            
+
             // Level distribution
             levelDistribution: calculateDistribution(sessions, 'level'),
             preferredLevel: getMostCommon(sessions, 'level'),
-            
+
             // Venue patterns
             venueDistribution: calculateDistribution(sessions, 'venue'),
             commonVenues: getTopN(sessions, 'venue', 3),
-            
+
             // Age range patterns
             ageRangeDistribution: calculateDistribution(sessions, 'ageRange'),
             commonAgeRange: getMostCommon(sessions, 'ageRange'),
-            
+
             // Goal analysis
             frequentGoals: extractCommonGoals(sessions),
-            
+
             // Activity patterns
             warmupPatterns: extractActivityPatterns(sessions, 'warmup'),
             mainActivityPatterns: extractActivityPatterns(sessions, 'activity'),
             cooldownPatterns: extractActivityPatterns(sessions, 'cooldown'),
-            
+
             // Reflection insights (if available)
             reflectionInsights: analyzeReflections(sessions),
-            
+
             // Consistency score (based on regularity)
             consistencyScore: calculateConsistencyScore(sessions),
-            
+
             // Recent trends
             recentTrends: analyzeRecentTrends(recentSessions)
         };
@@ -100,31 +100,19 @@ async function analyzeSessionHistory(userId) {
  */
 async function getUserContext(userId) {
     try {
-        const user = await User.findById(userId).select('name role email').lean();
+        const user = await User.findById(userId).select('name role email currentBelt').lean();
         if (!user) {
             throw new Error('User not found');
         }
 
         // Fetch belt progress
-        let beltLevel = 'White';
+        let beltLevel = user.currentBelt || 'White';
         let beltProgress = null;
-        
+
         try {
             beltProgress = await BeltProgress.findOne({ userId }).lean();
-            if (beltProgress && beltProgress.currentBelt) {
-                // Map belt codes to names
-                const beltMap = {
-                    'W': 'White',
-                    'Y': 'Yellow',
-                    'G': 'Green',
-                    'BL': 'Blue',
-                    'BR': 'Brown',
-                    'B': 'Black'
-                };
-                beltLevel = beltMap[beltProgress.currentBelt] || 'White';
-            }
         } catch (err) {
-            console.log('No belt progress found, defaulting to White belt');
+            console.log('No belt progress found, but keeping user belt:', beltLevel);
         }
 
         return {
@@ -145,19 +133,19 @@ async function getUserContext(userId) {
  */
 async function generateAIRecommendation(sessionAnalysis, userContext) {
     const startTime = Date.now();
-    
+
     try {
         const systemPrompt = buildRecommendationPrompt(sessionAnalysis, userContext);
-        
+
         const completion = await groq.chat.completions.create({
             messages: [
-                { 
-                    role: "system", 
-                    content: systemPrompt 
+                {
+                    role: "system",
+                    content: systemPrompt
                 },
-                { 
-                    role: "user", 
-                    content: "Based on the analysis provided, generate a comprehensive session recommendation for today's training. Provide structured, actionable suggestions." 
+                {
+                    role: "user",
+                    content: "Based on the analysis provided, generate a comprehensive session recommendation for today's training. Provide structured, actionable suggestions."
                 }
             ],
             model: "llama-3.3-70b-versatile",
@@ -185,7 +173,7 @@ async function generateAIRecommendation(sessionAnalysis, userContext) {
 
     } catch (error) {
         console.error('Error generating AI recommendation:', error);
-        
+
         // Fallback to rule-based recommendation
         return {
             recommendation: generateRuleBasedRecommendation(sessionAnalysis, userContext),
@@ -203,9 +191,9 @@ async function generateAIRecommendation(sessionAnalysis, userContext) {
  * Build the system prompt for AI recommendation
  */
 function buildRecommendationPrompt(analysis, userContext) {
-    const { hasHistory, totalSessions, preferredLevel, commonAgeRange, frequentGoals, 
-            daysSinceLastSession, consistencyScore, recentTrends, reflectionInsights } = analysis;
-    
+    const { hasHistory, totalSessions, preferredLevel, commonAgeRange, frequentGoals,
+        daysSinceLastSession, consistencyScore, recentTrends, reflectionInsights } = analysis;
+
     const { name, role, beltLevel } = userContext;
 
     return `You are an expert Taekwondo coach AI assistant for the "Mapped" training app.
@@ -299,77 +287,77 @@ Provide clear, structured guidance that ${name} can immediately implement.`;
 function parseAIResponse(aiResponse, analysis, userContext) {
     // This is a sophisticated parser that extracts structured data from the AI's text response
     // For now, we'll provide a structured template that gets populated
-    
+
     const recommendation = {
         suggestedLevel: analysis.preferredLevel || 'Beginner',
         suggestedDuration: analysis.averageSessionDuration || 60,
         recommendedVenue: analysis.commonVenues?.[0] || '',
         suggestedAgeRange: analysis.commonAgeRange || '',
         suggestedTraineeCount: analysis.typicalTraineeCount || 8,
-        
+
         goals: {
-            primary: extractSection(aiResponse, 'primary', 'main objective') || 
-                     'Develop fundamental Taekwondo techniques',
-            secondary: extractList(aiResponse, 'secondary goals') || 
-                      ['Improve physical conditioning', 'Build discipline and focus'],
-            reasoning: extractSection(aiResponse, 'reasoning', 'based on') || 
-                      'Based on consistent training patterns and progression path'
+            primary: extractSection(aiResponse, 'primary', 'main objective') ||
+                'Develop fundamental Taekwondo techniques',
+            secondary: extractList(aiResponse, 'secondary goals') ||
+                ['Improve physical conditioning', 'Build discipline and focus'],
+            reasoning: extractSection(aiResponse, 'reasoning', 'based on') ||
+                'Based on consistent training patterns and progression path'
         },
-        
+
         warmup: {
-            description: extractSection(aiResponse, 'warm-up', 'warm up') || 
-                        'Dynamic stretching and cardiovascular preparation',
+            description: extractSection(aiResponse, 'warm-up', 'warm up') ||
+                'Dynamic stretching and cardiovascular preparation',
             suggestedTime: 10,
-            keyExercises: extractList(aiResponse, 'warm-up', 'warm up') || 
-                         ['Light jogging', 'Arm circles', 'Leg swings', 'Hip rotations']
+            keyExercises: extractList(aiResponse, 'warm-up', 'warm up') ||
+                ['Light jogging', 'Arm circles', 'Leg swings', 'Hip rotations']
         },
-        
+
         activity: {
-            description: extractSection(aiResponse, 'main activity', 'activity') || 
-                        'Focused technique training with progressive drills',
+            description: extractSection(aiResponse, 'main activity', 'activity') ||
+                'Focused technique training with progressive drills',
             suggestedTime: analysis.averageSessionDuration - 20 || 40,
-            focusAreas: extractList(aiResponse, 'focus area') || 
-                       ['Basic stances', 'Front kick technique', 'Blocking fundamentals'],
-            drills: extractList(aiResponse, 'drill', 'exercise') || 
-                   ['Mirror drills', 'Target practice', 'Partner combinations'],
-            progressionTips: extractList(aiResponse, 'progression', 'tip') || 
-                            ['Start slow, focus on form', 'Gradually increase speed', 'Add complexity only when basics are solid']
+            focusAreas: extractList(aiResponse, 'focus area') ||
+                ['Basic stances', 'Front kick technique', 'Blocking fundamentals'],
+            drills: extractList(aiResponse, 'drill', 'exercise') ||
+                ['Mirror drills', 'Target practice', 'Partner combinations'],
+            progressionTips: extractList(aiResponse, 'progression', 'tip') ||
+                ['Start slow, focus on form', 'Gradually increase speed', 'Add complexity only when basics are solid']
         },
-        
+
         cooldown: {
-            description: extractSection(aiResponse, 'cool-down', 'cool down') || 
-                        'Static stretching and recovery',
+            description: extractSection(aiResponse, 'cool-down', 'cool down') ||
+                'Static stretching and recovery',
             suggestedTime: 10,
-            keyExercises: extractList(aiResponse, 'cool-down', 'cool down') || 
-                         ['Hamstring stretch', 'Quad stretch', 'Shoulder stretch', 'Breathing exercises']
+            keyExercises: extractList(aiResponse, 'cool-down', 'cool down') ||
+                ['Hamstring stretch', 'Quad stretch', 'Shoulder stretch', 'Breathing exercises']
         },
-        
+
         contingencies: {
-            description: extractSection(aiResponse, 'contingenc', 'backup') || 
-                        'Flexible alternatives for various scenarios',
+            description: extractSection(aiResponse, 'contingenc', 'backup') ||
+                'Flexible alternatives for various scenarios',
             scenarios: extractContingencyScenarios(aiResponse) || [
                 { situation: 'Low attendance', solution: 'Focus on individual technique refinement' },
                 { situation: 'Equipment unavailable', solution: 'Adapt to bodyweight exercises and partner drills' }
             ]
         },
-        
+
         riskAssessment: {
             description: 'Standard Taekwondo training safety protocols',
-            keyRisks: extractList(aiResponse, 'risk', 'safety') || 
-                     ['Muscle strains from insufficient warm-up', 'Impact injuries during sparring', 'Fatigue-related accidents'],
-            mitigationStrategies: extractList(aiResponse, 'mitigation', 'prevention') || 
-                                 ['Thorough warm-up routine', 'Proper protective equipment', 'Clear safety briefing', 'Adequate rest periods']
+            keyRisks: extractList(aiResponse, 'risk', 'safety') ||
+                ['Muscle strains from insufficient warm-up', 'Impact injuries during sparring', 'Fatigue-related accidents'],
+            mitigationStrategies: extractList(aiResponse, 'mitigation', 'prevention') ||
+                ['Thorough warm-up routine', 'Proper protective equipment', 'Clear safety briefing', 'Adequate rest periods']
         },
-        
+
         resources: {
             description: 'Essential training equipment',
-            required: extractList(aiResponse, 'required', 'essential') || 
-                     ['Training mats', 'First aid kit'],
-            optional: extractList(aiResponse, 'optional') || 
-                     ['Kicking shields', 'Focus mitts', 'Resistance bands']
+            required: extractList(aiResponse, 'required', 'essential') ||
+                ['Training mats', 'First aid kit'],
+            optional: extractList(aiResponse, 'optional') ||
+                ['Kicking shields', 'Focus mitts', 'Resistance bands']
         }
     };
-    
+
     return recommendation;
 }
 
@@ -378,20 +366,20 @@ function parseAIResponse(aiResponse, analysis, userContext) {
  */
 function generateInsights(analysis, userContext, aiResponse) {
     return {
-        strengthAreas: extractList(aiResponse, 'strength') || 
-                      analysis.reflectionInsights?.commonStrengths || 
-                      ['Consistent training schedule', 'Progressive goal setting'],
-        
-        improvementAreas: extractList(aiResponse, 'improvement', 'area for growth') || 
-                         analysis.reflectionInsights?.commonImprovements || 
-                         ['Session variety', 'Advanced technique integration'],
-        
-        motivationalMessage: extractSection(aiResponse, 'motivat', 'encourag') || 
-                           `Great progress, ${userContext.name}! Your consistency shows dedication. Keep building on your ${userContext.beltLevel} belt skills.`,
-        
-        progressionPath: extractSection(aiResponse, 'progression path', 'next steps') || 
-                        `Continue developing ${userContext.beltLevel} belt techniques while preparing for advancement.`,
-        
+        strengthAreas: extractList(aiResponse, 'strength') ||
+            analysis.reflectionInsights?.commonStrengths ||
+            ['Consistent training schedule', 'Progressive goal setting'],
+
+        improvementAreas: extractList(aiResponse, 'improvement', 'area for growth') ||
+            analysis.reflectionInsights?.commonImprovements ||
+            ['Session variety', 'Advanced technique integration'],
+
+        motivationalMessage: extractSection(aiResponse, 'motivat', 'encourag') ||
+            `Great progress, ${userContext.name}! Your consistency shows dedication. Keep building on your ${userContext.beltLevel} belt skills.`,
+
+        progressionPath: extractSection(aiResponse, 'progression path', 'next steps') ||
+            `Continue developing ${userContext.beltLevel} belt techniques while preparing for advancement.`,
+
         tipsForToday: extractList(aiResponse, 'tip', 'today') || [
             'Focus on proper form over speed',
             'Encourage questions and engagement',
@@ -407,26 +395,26 @@ function generateInsights(analysis, userContext, aiResponse) {
 function generateRuleBasedRecommendation(analysis, userContext) {
     const { beltLevel } = userContext;
     const level = analysis.preferredLevel || 'Beginner';
-    
+
     return {
         suggestedLevel: level,
         suggestedDuration: analysis.averageSessionDuration || 60,
         recommendedVenue: analysis.commonVenues?.[0] || 'Main Training Hall',
         suggestedAgeRange: analysis.commonAgeRange || '8-12 years',
         suggestedTraineeCount: analysis.typicalTraineeCount || 8,
-        
+
         goals: {
             primary: `Develop ${level.toLowerCase()} ${beltLevel} belt techniques`,
             secondary: ['Improve physical fitness', 'Build confidence', 'Practice discipline'],
             reasoning: 'Based on your consistent training pattern and current belt level'
         },
-        
+
         warmup: {
             description: 'Dynamic warm-up to prepare for training',
             suggestedTime: 10,
             keyExercises: ['Light jogging', 'Arm circles', 'Leg swings', 'Dynamic stretching', 'Basic stances']
         },
-        
+
         activity: {
             description: 'Focused technique practice with progressive difficulty',
             suggestedTime: 40,
@@ -439,13 +427,13 @@ function generateRuleBasedRecommendation(analysis, userContext) {
                 'Gradually increase intensity'
             ]
         },
-        
+
         cooldown: {
             description: 'Static stretching and recovery',
             suggestedTime: 10,
             keyExercises: ['Hamstring stretch', 'Quad stretch', 'Calf stretch', 'Shoulder stretch', 'Deep breathing']
         },
-        
+
         contingencies: {
             description: 'Backup plans for common scenarios',
             scenarios: [
@@ -454,7 +442,7 @@ function generateRuleBasedRecommendation(analysis, userContext) {
                 { situation: 'Weather issues (outdoor)', solution: 'Move to covered area or adjust to space-efficient drills' }
             ]
         },
-        
+
         riskAssessment: {
             description: 'Standard safety protocols for Taekwondo training',
             keyRisks: ['Muscle strains', 'Impact injuries', 'Overexertion'],
@@ -466,7 +454,7 @@ function generateRuleBasedRecommendation(analysis, userContext) {
                 'First aid kit readily available'
             ]
         },
-        
+
         resources: {
             description: 'Training equipment needed',
             required: ['Training mats', 'First aid kit', 'Water station'],
@@ -488,9 +476,9 @@ function calculateAverage(sessions, field) {
         }
         return val;
     }).filter(v => v && !isNaN(v));
-    
-    return values.length > 0 
-        ? values.reduce((sum, v) => sum + v, 0) / values.length 
+
+    return values.length > 0
+        ? values.reduce((sum, v) => sum + v, 0) / values.length
         : 0;
 }
 
@@ -509,14 +497,14 @@ function getMostCommon(sessions, field) {
     const dist = calculateDistribution(sessions, field);
     let maxCount = 0;
     let mostCommon = null;
-    
+
     for (const [value, count] of Object.entries(dist)) {
         if (count > maxCount) {
             maxCount = count;
             mostCommon = value;
         }
     }
-    
+
     return mostCommon;
 }
 
@@ -532,11 +520,11 @@ function extractCommonGoals(sessions) {
     const allGoals = sessions
         .map(s => s.goals)
         .filter(g => g && g.trim().length > 0);
-    
+
     // Simple extraction of common themes
     const themes = new Set();
     const keywords = ['kick', 'form', 'poomsae', 'spar', 'technique', 'stance', 'belt', 'discipline', 'fitness', 'defense'];
-    
+
     allGoals.forEach(goal => {
         const lowerGoal = goal.toLowerCase();
         keywords.forEach(keyword => {
@@ -545,7 +533,7 @@ function extractCommonGoals(sessions) {
             }
         });
     });
-    
+
     return Array.from(themes).slice(0, 5);
 }
 
@@ -554,25 +542,25 @@ function extractActivityPatterns(sessions, activityType) {
         .map(s => s[activityType]?.desc)
         .filter(desc => desc && desc.trim().length > 0)
         .slice(0, 3);
-    
+
     return patterns.length > 0 ? patterns : [`No ${activityType} data`];
 }
 
 function analyzeReflections(sessions) {
     const reflections = sessions
         .filter(s => s.reflection && (
-            s.reflection.highlights || 
-            s.reflection.improvements || 
+            s.reflection.highlights ||
+            s.reflection.improvements ||
             s.reflection.rating > 0
         ));
-    
+
     if (reflections.length === 0) return null;
-    
+
     const avgRating = reflections
         .filter(r => r.reflection.rating > 0)
-        .reduce((sum, r) => sum + r.reflection.rating, 0) / 
+        .reduce((sum, r) => sum + r.reflection.rating, 0) /
         Math.max(reflections.filter(r => r.reflection.rating > 0).length, 1);
-    
+
     return {
         totalReflections: reflections.length,
         averageRating: avgRating.toFixed(1),
@@ -585,115 +573,115 @@ function extractReflectionThemes(reflections, field) {
     const themes = reflections
         .map(r => r.reflection[field])
         .filter(t => t && t.trim().length > 0);
-    
+
     return themes.length > 0 ? themes.slice(0, 3) : [];
 }
 
 function calculateConsistencyScore(sessions) {
     if (sessions.length < 2) return 50;
-    
+
     // Calculate based on regularity of sessions
     const dates = sessions.map(s => new Date(s.date)).sort((a, b) => a - b);
     const intervals = [];
-    
+
     for (let i = 1; i < dates.length; i++) {
-        const days = (dates[i] - dates[i-1]) / (1000 * 60 * 60 * 24);
+        const days = (dates[i] - dates[i - 1]) / (1000 * 60 * 60 * 24);
         intervals.push(days);
     }
-    
+
     const avgInterval = intervals.reduce((sum, i) => sum + i, 0) / intervals.length;
     const variance = intervals.reduce((sum, i) => sum + Math.pow(i - avgInterval, 2), 0) / intervals.length;
     const stdDev = Math.sqrt(variance);
-    
+
     // Lower standard deviation = higher consistency
     // Normalize to 0-100 scale (assuming weekly sessions as ideal)
     const consistencyScore = Math.max(0, Math.min(100, 100 - (stdDev * 5)));
-    
+
     return Math.round(consistencyScore);
 }
 
 function analyzeRecentTrends(recentSessions) {
     if (recentSessions.length < 2) return 'Insufficient data for trend analysis';
-    
+
     const trends = [];
-    
+
     // Check if duration is increasing/decreasing
-    const durations = recentSessions.map(s => 
+    const durations = recentSessions.map(s =>
         typeof s.duration === 'string' ? parseInt(s.duration) : s.duration
     ).filter(d => d && !isNaN(d));
-    
+
     if (durations.length >= 2) {
         const recentAvg = durations.slice(0, 2).reduce((a, b) => a + b) / 2;
         const olderAvg = durations.slice(-2).reduce((a, b) => a + b) / 2;
-        
+
         if (recentAvg > olderAvg + 5) trends.push('Increasing session duration');
         else if (recentAvg < olderAvg - 5) trends.push('Decreasing session duration');
     }
-    
+
     // Check trainee count trends
     const traineeCounts = recentSessions.map(s => s.totalTrainees).filter(t => t);
     if (traineeCounts.length >= 2) {
         const recentAvg = traineeCounts.slice(0, 2).reduce((a, b) => a + b) / 2;
         const olderAvg = traineeCounts.slice(-2).reduce((a, b) => a + b) / 2;
-        
+
         if (recentAvg > olderAvg + 2) trends.push('Growing class sizes');
         else if (recentAvg < olderAvg - 2) trends.push('Smaller class sizes');
     }
-    
+
     return trends.length > 0 ? trends.join('; ') : 'Stable training pattern';
 }
 
 function extractSection(text, ...keywords) {
     if (!text) return '';
-    
+
     const lines = text.split('\n');
     let capturing = false;
     let content = [];
-    
+
     for (const line of lines) {
         const lowerLine = line.toLowerCase();
-        
+
         // Check if this line contains any of the keywords
         if (keywords.some(kw => lowerLine.includes(kw.toLowerCase()))) {
             capturing = true;
             continue;
         }
-        
+
         // If we're capturing and hit a new section header, stop
         if (capturing && line.match(/^\d+\.|^[A-Z ]+:|\*\*/)) {
             if (content.length > 0) break;
         }
-        
+
         // Capture content
         if (capturing && line.trim().length > 0) {
             content.push(line.trim().replace(/^[-*•]\s*/, ''));
         }
     }
-    
+
     return content.join(' ').slice(0, 500);
 }
 
 function extractList(text, ...keywords) {
     if (!text) return [];
-    
+
     const lines = text.split('\n');
     let capturing = false;
     let items = [];
-    
+
     for (const line of lines) {
         const lowerLine = line.toLowerCase();
-        
+
         // Check if this line contains any of the keywords
         if (keywords.some(kw => lowerLine.includes(kw.toLowerCase()))) {
             capturing = true;
             continue;
         }
-        
+
         // If we're capturing and hit a new section header, stop
         if (capturing && line.match(/^\d+\.|^[A-Z ]+:/)) {
             if (items.length > 0) break;
         }
-        
+
         // Capture list items
         if (capturing && line.trim().length > 0) {
             const cleaned = line.trim().replace(/^[-*•\d.)\]]\s*/, '');
@@ -702,7 +690,7 @@ function extractList(text, ...keywords) {
             }
         }
     }
-    
+
     return items.slice(0, 10);
 }
 
@@ -710,32 +698,32 @@ function extractContingencyScenarios(text) {
     const scenarios = [];
     const lines = text.split('\n');
     let inContingency = false;
-    
+
     for (const line of lines) {
         if (line.toLowerCase().includes('contingenc') || line.toLowerCase().includes('backup')) {
             inContingency = true;
             continue;
         }
-        
+
         if (inContingency && line.trim().length > 0) {
             if (line.match(/^\d+\.|^[A-Z ]+:/)) {
                 if (scenarios.length > 0) break;
             }
-            
+
             // Try to extract situation-solution pairs
             const cleaned = line.trim().replace(/^[-*•\d.)\]]\s*/, '');
             if (cleaned.includes(':')) {
                 const [situation, solution] = cleaned.split(':').map(s => s.trim());
                 scenarios.push({ situation, solution });
             } else if (cleaned.length > 5) {
-                scenarios.push({ 
-                    situation: cleaned, 
-                    solution: 'Adapt session plan as needed' 
+                scenarios.push({
+                    situation: cleaned,
+                    solution: 'Adapt session plan as needed'
                 });
             }
         }
     }
-    
+
     return scenarios.slice(0, 3);
 }
 
@@ -748,7 +736,7 @@ function getBeltSpecificFocusAreas(beltLevel) {
         'Brown': ['Jump kicks', 'Combination techniques', 'Sparring strategies', 'Taegeuk Oh Jang'],
         'Black': ['Advanced combinations', 'Teaching techniques', 'Competition preparation', 'Koryo form']
     };
-    
+
     return focusAreas[beltLevel] || focusAreas['White'];
 }
 
@@ -761,7 +749,7 @@ function getBeltSpecificDrills(beltLevel) {
         'Brown': ['Multiple kick combinations', 'Jump roundhouse', 'Competition drills', 'Board breaking practice'],
         'Black': ['Teaching practice', 'Advanced sparring strategies', 'Demonstration techniques', 'Form perfection']
     };
-    
+
     return drills[beltLevel] || drills['White'];
 }
 
@@ -784,32 +772,37 @@ module.exports = (asyncHandler) => {
 
         // Validate userId
         if (!mongoose.Types.ObjectId.isValid(userId)) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Invalid userId format' 
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid userId format'
             });
         }
 
-        // Check for existing active recommendation (unless forceNew is true)
-        if (!forceNew) {
-            const existingRecommendation = await SessionRecommendation.getLatestForUser(userId);
-            if (existingRecommendation) {
-                console.log('✅ Returning existing active recommendation');
-                return res.json({
-                    success: true,
-                    data: existingRecommendation,
-                    cached: true,
-                    message: 'Using existing recommendation from today'
-                });
-            }
+        // Limit to once per calendar day
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+
+        const existingToday = await SessionRecommendation.findOne({
+            userId,
+            createdAt: { $gte: startOfDay }
+        }).sort({ createdAt: -1 });
+
+        if (existingToday) {
+            console.log('✅ AI limit reached: Returning today\'s existing recommendation');
+            return res.json({
+                success: true,
+                data: existingToday,
+                cached: true,
+                message: 'Daily limit reached. Using existing recommendation from today.'
+            });
         }
 
         // Validate API key
         if (!process.env.GROQ_API_KEY || process.env.GROQ_API_KEY === 'dummy_key_if_not_set') {
             console.error('❌ GROQ_API_KEY is missing');
-            return res.status(500).json({ 
+            return res.status(500).json({
                 success: false,
-                error: 'AI service is currently unavailable' 
+                error: 'AI service is currently unavailable'
             });
         }
 
@@ -825,15 +818,15 @@ module.exports = (asyncHandler) => {
             // Step 3: Generate AI recommendation
             console.log('🤖 Generating AI recommendation...');
             const { recommendation, metadata } = await generateAIRecommendation(
-                sessionAnalysis, 
+                sessionAnalysis,
                 userContext
             );
 
             // Step 4: Generate insights
             console.log('💡 Generating insights...');
             const insights = generateInsights(
-                sessionAnalysis, 
-                userContext, 
+                sessionAnalysis,
+                userContext,
                 metadata.rawResponse
             );
 
@@ -895,9 +888,9 @@ module.exports = (asyncHandler) => {
         const { userId } = req.params;
 
         if (!mongoose.Types.ObjectId.isValid(userId)) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Invalid userId format' 
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid userId format'
             });
         }
 
@@ -925,14 +918,14 @@ module.exports = (asyncHandler) => {
         const { limit } = req.query;
 
         if (!mongoose.Types.ObjectId.isValid(userId)) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Invalid userId format' 
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid userId format'
             });
         }
 
         const history = await SessionRecommendation.getUserRecommendationHistory(
-            userId, 
+            userId,
             parseInt(limit) || 10
         );
 
@@ -952,9 +945,9 @@ module.exports = (asyncHandler) => {
         const { wasUseful, rating, comments, wasImplemented } = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(recommendationId)) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Invalid recommendation ID' 
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid recommendation ID'
             });
         }
 
@@ -988,9 +981,9 @@ module.exports = (asyncHandler) => {
         const { recommendationId } = req.params;
 
         if (!mongoose.Types.ObjectId.isValid(recommendationId)) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Invalid recommendation ID' 
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid recommendation ID'
             });
         }
 
@@ -1019,9 +1012,9 @@ module.exports = (asyncHandler) => {
         const { recommendationId } = req.params;
 
         if (!mongoose.Types.ObjectId.isValid(recommendationId)) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Invalid recommendation ID' 
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid recommendation ID'
             });
         }
 
@@ -1050,9 +1043,9 @@ module.exports = (asyncHandler) => {
         const { userId } = req.params;
 
         if (!mongoose.Types.ObjectId.isValid(userId)) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Invalid userId format' 
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid userId format'
             });
         }
 
@@ -1063,15 +1056,15 @@ module.exports = (asyncHandler) => {
             implementedCount: recommendations.filter(r => r.status === 'implemented').length,
             averageRating: recommendations
                 .filter(r => r.userFeedback.rating)
-                .reduce((sum, r) => sum + r.userFeedback.rating, 0) / 
+                .reduce((sum, r) => sum + r.userFeedback.rating, 0) /
                 Math.max(recommendations.filter(r => r.userFeedback.rating).length, 1),
             usefulCount: recommendations.filter(r => r.userFeedback.wasUseful === true).length,
-            mostCommonLevel: getMostCommon(recommendations.map(r => ({ 
-                level: r.recommendation.suggestedLevel 
+            mostCommonLevel: getMostCommon(recommendations.map(r => ({
+                level: r.recommendation.suggestedLevel
             })), 'level'),
-            averageGenerationTime: recommendations.reduce((sum, r) => 
+            averageGenerationTime: recommendations.reduce((sum, r) =>
                 sum + (r.aiMetadata.generationTime || 0), 0) / recommendations.length,
-            totalTokensUsed: recommendations.reduce((sum, r) => 
+            totalTokensUsed: recommendations.reduce((sum, r) =>
                 sum + (r.aiMetadata.tokensUsed.total_tokens || 0), 0)
         };
 
@@ -1086,8 +1079,8 @@ module.exports = (asyncHandler) => {
      * Health check for recommendation service
      */
     router.get('/health', asyncHandler(async (req, res) => {
-        const isApiConfigured = process.env.GROQ_API_KEY && 
-                               process.env.GROQ_API_KEY !== 'dummy_key_if_not_set';
+        const isApiConfigured = process.env.GROQ_API_KEY &&
+            process.env.GROQ_API_KEY !== 'dummy_key_if_not_set';
         const isDbConnected = mongoose.connection.readyState === 1;
 
         res.json({

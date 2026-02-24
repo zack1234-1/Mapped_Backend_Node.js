@@ -294,7 +294,16 @@ router.post('/verify-otp', asyncHandler(async (req, res) => {
   }));
 
   router.post('/forgot-password', asyncHandler(async (req, res) => {
-    const { identifier } = req.body;
+    // Change 'email' to 'identifier' to match your Flutter jsonEncode
+    const { identifier } = req.body; 
+
+    if (!identifier) {
+      return res.status(400).json({ 
+        success: false, 
+        msg: 'Email or Name is required' // This is the message you're seeing
+      });
+    }
+
     const user = await User.findOne({
       $or: [
         { email: identifier.toLowerCase() },
@@ -302,7 +311,10 @@ router.post('/verify-otp', asyncHandler(async (req, res) => {
       ]
     });
 
-    if (!user) return res.status(404).json({ success: false, msg: 'User not found' });
+    if (!user) {
+      return res.status(404).json({ success: false, msg: 'User not found' });
+    }
+
     res.json({ success: true, email: user.email });
   }));
 

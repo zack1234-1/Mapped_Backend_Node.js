@@ -293,5 +293,18 @@ router.post('/verify-otp', asyncHandler(async (req, res) => {
     });
   }));
 
+  router.post('/forgot-password', asyncHandler(async (req, res) => {
+    const { identifier } = req.body;
+    const user = await User.findOne({
+      $or: [
+        { email: identifier.toLowerCase() },
+        { name: { $regex: new RegExp(`^${identifier}$`, 'i') } }
+      ]
+    });
+
+    if (!user) return res.status(404).json({ success: false, msg: 'User not found' });
+    res.json({ success: true, email: user.email });
+  }));
+
 
 module.exports = router;

@@ -263,36 +263,35 @@ router.post('/verify-otp', asyncHandler(async (req, res) => {
   });
 }));
 
-router.post('/reset-password', asyncHandler(async (req, res) => {
-  let { email, otp, newPassword } = req.body;
+  router.post('/reset-password', asyncHandler(async (req, res) => {
+    let { email, newPassword } = req.body;
 
-  // Defensive Check: If email is an object, extract the string
-  if (typeof email === 'object' && email.email) {
-    email = email.email;
-  }
+    // 1. Defensive Check: Standardize email input
+    if (typeof email === 'object' && email.email) {
+      email = email.email;
+    } 
+    
+    const user = await User.findOne({ email: email });
 
-  const user = await User.findOne({
-    email: email, // Now guaranteed to be a string
-    resetPasswordToken: otp,
-    resetPasswordExpires: { $gt: Date.now() }
-  });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        msg: 'User not found'
+      });
+    }
 
-  if (!user) {
-    return res.status(400).json({
-      success: false,
-      msg: 'Session expired or invalid code'
+    user.password = newPassword; 
+
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+
+    await user.save();
+
+    res.json({
+      success: true,
+      msg: 'Password reset successful'
     });
-  }
+  }));
 
-  user.password = newPassword;
-  user.resetPasswordToken = undefined;
-  user.resetPasswordExpires = undefined;
-  await user.save();
-
-  res.json({
-    success: true,
-    msg: 'Password reset successful'
-  });
-}));
 
 module.exports = router;

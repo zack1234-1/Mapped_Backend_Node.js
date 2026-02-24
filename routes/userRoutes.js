@@ -183,63 +183,6 @@ router.post('/google-register', asyncHandler(async (req, res) => {
   });
 }));
 
-// 5. FORGOT PASSWORD
-router.post('/forgot-password', asyncHandler(async (req, res) => {
-  const { email } = req.body;
-  
-  if (!email) {
-    return res.status(400).json({
-      success: false,
-      msg: 'Email is required'
-    });
-  }
-
-  const user = await User.findOne({ email });
-  if (!user) {
-    return res.status(404).json({
-      success: false,
-      msg: 'User not found'
-    });
-  }
-
-  // Generate 4-digit OTP
-  const otp = Math.floor(1000 + Math.random() * 9000).toString();
-  user.resetPasswordToken = otp;
-  user.resetPasswordExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
-  await user.save();
-
-  try {
-    await sendEmail({
-      email: user.email,
-      subject: 'Your Password Reset Code',
-      html: `
-        <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 10px; max-width: 500px;">
-          <h2 style="color: #333;">Password Reset Request</h2>
-          <p>Use the following 4-digit code to reset your password. Valid for 10 minutes.</p>
-          <div style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #4CAF50; text-align: center; padding: 20px; background: #f9f9f9;">
-            ${otp}
-          </div>
-        </div>
-      `
-    });
-    
-    res.json({
-      success: true,
-      msg: 'Code sent to email'
-    });
-  } catch (error) {
-    // Reset token if email fails
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpires = undefined;
-    await user.save();
-    
-    res.status(500).json({
-      success: false,
-      msg: 'Email could not be sent'
-    });
-  }
-}));
-
 // 6. VERIFY OTP
 router.post('/verify-otp', asyncHandler(async (req, res) => {
   const { email, otp } = req.body;

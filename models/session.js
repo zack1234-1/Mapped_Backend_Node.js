@@ -42,8 +42,6 @@ const SessionSchema = new Schema({
     },
     level: { 
         type: String,
-        enum: ['Beginner', 'Intermediate', 'Advanced'],
-        default: 'Beginner'
     },
     duration: { 
         type: Number,

@@ -5,6 +5,28 @@ const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 
+// Import all models required for cascading deletion
+const BeltProgress = require('../models/beltProgress');
+const CoachBotUsage = require('../models/CoachBotUsage');
+const Post = require('../models/Post');
+const Resource = require('../models/resource');
+const Session = require('../models/session');
+const SessionRecommendation = require('../models/sessionRecommendation');
+const Support = require('../models/support');
+const Trainee = require('../models/trainee');
+const Progress = require('../models/progress');
+
+// Import all models required for cascading deletion
+const BeltProgress = require('../models/beltProgress');
+const CoachBotUsage = require('../models/CoachBotUsage');
+const Post = require('../models/Post');
+const Resource = require('../models/resource');
+const Session = require('../models/session');
+const SessionRecommendation = require('../models/sessionRecommendation');
+const Support = require('../models/support');
+const Trainee = require('../models/trainee');
+const Progress = require('../models/progress');
+
 const transporter = nodemailer.createTransport({
   host: 'smtp-relay.brevo.com',
   port: 587,
@@ -86,7 +108,7 @@ router.post('/login', asyncHandler(async (req, res) => {
   const { email, password } = req.body;
 
   const user = await User.findOne({ email });
-  
+
   if (!user) {
     return res.status(400).json({
       success: false,
@@ -183,6 +205,63 @@ router.post('/google-register', asyncHandler(async (req, res) => {
   });
 }));
 
+// 5. FORGOT PASSWORD
+router.post('/forgot-password', asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      msg: 'Email is required'
+    });
+  }
+
+  const user = await User.findOne({ email });
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      msg: 'User not found'
+    });
+  }
+
+  // Generate 4-digit OTP
+  const otp = Math.floor(1000 + Math.random() * 9000).toString();
+  user.resetPasswordToken = otp;
+  user.resetPasswordExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+  await user.save();
+
+  try {
+    await sendEmail({
+      email: user.email,
+      subject: 'Your Password Reset Code',
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 10px; max-width: 500px;">
+          <h2 style="color: #333;">Password Reset Request</h2>
+          <p>Use the following 4-digit code to reset your password. Valid for 10 minutes.</p>
+          <div style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #4CAF50; text-align: center; padding: 20px; background: #f9f9f9;">
+            ${otp}
+          </div>
+        </div>
+      `
+    });
+
+    res.json({
+      success: true,
+      msg: 'Code sent to email'
+    });
+  } catch (error) {
+    // Reset token if email fails
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+    await user.save();
+
+    res.status(500).json({
+      success: false,
+      msg: 'Email could not be sent'
+    });
+  }
+}));
+
 // 6. VERIFY OTP
 router.post('/verify-otp', asyncHandler(async (req, res) => {
   const { email, otp } = req.body;
@@ -235,6 +314,61 @@ router.post('/verify-otp', asyncHandler(async (req, res) => {
       msg: 'Password reset successful'
     });
   }));
+// 7. DELETE ACCOUNT
+router.delete('/:id', asyncHandler(async (req, res) => {
+  const userId = req.params.id;
+
+  const user = await User.findById(userId);
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      msg: 'User not found'
+    });
+  }
+
+  // Find all trainees associated with this user (trainer)
+  const trainees = await Trainee.find({ trainerId: userId });
+  const traineeIds = trainees.map(t => t._id);
+
+  // Run all deletion operations in parallel where possible
+  await Promise.all([
+    // Delete User's own records directly tied to them
+    BeltProgress.deleteMany({ userId }),
+    CoachBotUsage.deleteMany({ userId }),
+    Post.deleteMany({ user: userId }),
+    Resource.deleteMany({ authorId: userId }),
+    Session.deleteMany({ trainerId: userId }),
+    SessionRecommendation.deleteMany({ userId }),
+    Support.deleteMany({ userId }),
+
+    // Delete Trainees for this trainer and their Progress
+    Progress.deleteMany({ trainee: { $in: traineeIds } }),
+    Trainee.deleteMany({ trainerId: userId }),
+
+    // Clean up User references elsewhere (likes, comments, assignments)
+    Post.updateMany({}, {
+      $pull: {
+        likes: { user: userId },
+        comments: { user: userId },
+        reports: { user: userId }
+      }
+    }),
+    Support.updateMany({}, {
+      $pull: { responses: { respondedBy: userId } }
+    }),
+    Support.updateMany({ assignedTo: userId }, {
+      $unset: { assignedTo: 1 }
+    })
+  ]);
+
+  // Finally delete the user
+  await User.findByIdAndDelete(userId);
+
+  res.json({
+    success: true,
+    msg: 'Account and all associated data deleted successfully'
+  });
+}));
 
   router.post('/forgot-password', asyncHandler(async (req, res) => {
     // Change 'email' to 'identifier' to match your Flutter jsonEncode

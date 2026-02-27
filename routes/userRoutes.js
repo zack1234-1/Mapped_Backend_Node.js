@@ -16,30 +16,13 @@ const Support = require('../models/support');
 const Trainee = require('../models/trainee');
 const Progress = require('../models/progress');
 
-// Import all models required for cascading deletion
-const BeltProgress = require('../models/beltProgress');
-const CoachBotUsage = require('../models/CoachBotUsage');
-const Post = require('../models/Post');
-const Resource = require('../models/resource');
-const Session = require('../models/session');
-const SessionRecommendation = require('../models/sessionRecommendation');
-const Support = require('../models/support');
-const Trainee = require('../models/trainee');
-const Progress = require('../models/progress');
-
+// Create transporter for email
 const transporter = nodemailer.createTransport({
-  host: 'smtp-relay.brevo.com',
-  port: 587,
-  secure: false,
+  service: 'Gmail',
   auth: {
-    user: process.env.BREVO_USER,
-    pass: process.env.BREVO_PASS,
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
   },
-});
-
-transporter.verify((error, success) => {
-  if (error) console.log('Local test failed:', error);
-  else console.log('Local test succeeded – ready to send');
 });
 
 // Email helper function
@@ -285,35 +268,37 @@ router.post('/verify-otp', asyncHandler(async (req, res) => {
   });
 }));
 
-  router.post('/reset-password', asyncHandler(async (req, res) => {
-    let { email, newPassword } = req.body;
+router.post('/reset-password', asyncHandler(async (req, res) => {
+  let { email, otp, newPassword } = req.body;
 
-    // 1. Defensive Check: Standardize email input
-    if (typeof email === 'object' && email.email) {
-      email = email.email;
-    } 
-    
-    const user = await User.findOne({ email: email });
+  // Defensive Check: If email is an object, extract the string
+  if (typeof email === 'object' && email.email) {
+    email = email.email;
+  }
 
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        msg: 'User not found'
-      });
-    }
+  const user = await User.findOne({
+    email: email, // Now guaranteed to be a string
+    resetPasswordToken: otp,
+    resetPasswordExpires: { $gt: Date.now() }
+  });
 
-    user.password = newPassword; 
-
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpires = undefined;
-
-    await user.save();
-
-    res.json({
-      success: true,
-      msg: 'Password reset successful'
+  if (!user) {
+    return res.status(400).json({
+      success: false,
+      msg: 'Session expired or invalid code'
     });
-  }));
+  }
+
+  user.password = newPassword;
+  user.resetPasswordToken = undefined;
+  user.resetPasswordExpires = undefined;
+  await user.save();
+
+  res.json({
+    success: true,
+    msg: 'Password reset successful'
+  });
+}));
 // 7. DELETE ACCOUNT
 router.delete('/:id', asyncHandler(async (req, res) => {
   const userId = req.params.id;
@@ -369,31 +354,5 @@ router.delete('/:id', asyncHandler(async (req, res) => {
     msg: 'Account and all associated data deleted successfully'
   });
 }));
-
-  router.post('/forgot-password', asyncHandler(async (req, res) => {
-    // Change 'email' to 'identifier' to match your Flutter jsonEncode
-    const { identifier } = req.body; 
-
-    if (!identifier) {
-      return res.status(400).json({ 
-        success: false, 
-        msg: 'Email or Name is required' // This is the message you're seeing
-      });
-    }
-
-    const user = await User.findOne({
-      $or: [
-        { email: identifier.toLowerCase() },
-        { name: { $regex: new RegExp(`^${identifier}$`, 'i') } }
-      ]
-    });
-
-    if (!user) {
-      return res.status(404).json({ success: false, msg: 'User not found' });
-    }
-
-    res.json({ success: true, email: user.email });
-  }));
-
 
 module.exports = router;

@@ -27,7 +27,7 @@ const CoachBotUsageSchema = new mongoose.Schema({
     
     model: {
         type: String,
-        default: 'llama-3.3-70b-versatile'
+        default: 'openai/gpt-oss-120b'
     },
     
     // Enhanced fields for analytics

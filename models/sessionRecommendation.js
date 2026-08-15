@@ -133,7 +133,7 @@ const RecommendationSchema = new Schema({
     
     // AI model information
     aiMetadata: {
-        model: { type: String, default: 'llama-3.3-70b-versatile' },
+        model: { type: String, default: 'openai/gpt-oss-120b' },
         tokensUsed: {
             prompt_tokens: { type: Number, default: 0 },
             completion_tokens: { type: Number, default: 0 },

@@ -148,7 +148,7 @@ async function generateAIRecommendation(sessionAnalysis, userContext) {
                     content: "Based on the analysis provided, generate a comprehensive session recommendation for today's training. Provide structured, actionable suggestions."
                 }
             ],
-            model: "llama-3.3-70b-versatile",
+            model: "openai/gpt-oss-120b",
             temperature: 0.7,
             max_tokens: 2000,
             top_p: 0.9,

@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const BeltProgress = require('../models/beltProgress');
 const User = require('../models/User');
+const Post = require('../models/Post');
 const BELT_ORDER = ['W', 'Y', 'G', 'B', 'R', 'L'];
 
 const REQUIREMENTS = {
@@ -148,11 +149,30 @@ const incrementBeltProgress = async (userId, fieldType) => {
     if (!dbField || !reqKey) return;
 
     const target = REQUIREMENTS[activeCode][reqKey] || 0;
-    if (target === 0) return;
+    if (target === 0 && fieldType !== 'post') return;
 
     const currentVal = progressDoc.belts[activeCode][dbField] || 0;
-    if (currentVal < target) {
+    if (target > 0 && currentVal < target) {
         progressDoc.belts[activeCode][dbField] = currentVal + 1;
+    }
+
+    // If user posted or replied in forum, ensure Blue and Green belt post requirements are fulfilled
+    if (fieldType === 'post') {
+        ['G', 'B'].forEach(code => {
+            if (progressDoc.belts && progressDoc.belts[code]) {
+                if ((progressDoc.belts[code].postCount || 0) < 1) {
+                    progressDoc.belts[code].postCount = 1;
+                    const bReq = REQUIREMENTS[code];
+                    progressDoc.belts[code].progressPercentage = calculatePercentage(progressDoc.belts[code], bReq);
+                    if (areRequirementsMet(progressDoc.belts[code], bReq) || progressDoc.belts[code].progressPercentage >= 100) {
+                        progressDoc.belts[code].isCompleted = true;
+                        progressDoc.belts[code].progressPercentage = 100;
+                        progressDoc.belts[code].completedAt = progressDoc.belts[code].completedAt || new Date();
+                    }
+                    progressDoc.markModified(`belts.${code}`);
+                }
+            }
+        });
     }
 
     const req = REQUIREMENTS[activeCode];
@@ -268,6 +288,30 @@ const getAndHealBeltData = async (userId) => {
 
     let hasChanges = false;
     const responseBelts = {};
+
+    // Heal: If user has already posted or commented in the forum, ensure Blue and Green belt postCount is at least 1
+    try {
+        if (mongoose.Types.ObjectId.isValid(userId)) {
+            const hasForumActivity = await Post.exists({
+                $or: [
+                    { user: userId },
+                    { 'comments.user': userId }
+                ]
+            });
+
+            if (hasForumActivity) {
+                ['G', 'B'].forEach(code => {
+                    if (!progressDoc.belts[code]) progressDoc.belts[code] = {};
+                    if ((progressDoc.belts[code].postCount || 0) < 1) {
+                        progressDoc.belts[code].postCount = 1;
+                        hasChanges = true;
+                    }
+                });
+            }
+        }
+    } catch (forumCheckErr) {
+        console.error("Error checking forum activity in getAndHealBeltData:", forumCheckErr);
+    }
 
     BELT_ORDER.forEach(code => {
         if (!progressDoc.belts[code]) {

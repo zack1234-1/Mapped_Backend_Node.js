@@ -102,6 +102,15 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Normalize duplicate /api/api prefixes sent by mobile frontend controllers
+// (e.g. CreateResourceController sending POST /api/api/resources because _apiService.baseUrl already ends with /api)
+app.use((req, res, next) => {
+  if (req.url === '/api/api' || req.url.startsWith('/api/api/') || req.url.startsWith('/api/api?')) {
+    req.url = req.url.replace(/^\/api\/api/, '/api');
+  }
+  next();
+});
+
 // Static files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
@@ -304,6 +313,7 @@ try {
   const profileRoutes = require('./routes/profileRoutes');
   if (typeof profileRoutes === 'function') {
     app.use('/api/profile', profileRoutes);
+    app.use('/api/auth', profileRoutes); // Alias for frontend controllers calling /api/auth/:id
     console.log('✅ Profile routes loaded');
   } else {
     console.log('⚠️  Profile routes not a function, using default');

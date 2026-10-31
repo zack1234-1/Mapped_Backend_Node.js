@@ -269,7 +269,10 @@ router.delete('/:id', async (req, res) => {
         const resource = await Resource.findById(req.params.id);
         if (!resource) return res.status(404).json({ msg: 'Resource not found' });
 
-        if (resource.authorId.toString() !== userId) {
+        const user = await User.findById(userId).select('role');
+        const isAdmin = user && user.role === 'admin';
+
+        if (!isAdmin && (!resource.authorId || resource.authorId.toString() !== userId)) {
             return res.status(401).json({ msg: 'User not authorized to delete this resource' });
         }
 

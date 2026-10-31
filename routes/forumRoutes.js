@@ -26,16 +26,16 @@ const storage = multer.memoryStorage();
 const upload = multer({ 
     storage: storage, 
     limits: { 
-        fileSize: 1 * 1024 * 1024, // 1MB per file
+       // fileSize: 1 * 1024 * 1024, // 1MB per file
         files: 4 // Maximum 4 files
     },
-    fileFilter: (req, file, cb) => {
-        // Check file size
-        if (file.size > 1 * 1024 * 1024) {
-            return cb(new Error('File size exceeds 1MB limit'));
-        }
-        cb(null, true);
-    }
+    // fileFilter: (req, file, cb) => {
+    //     // Check file size
+    //     if (file.size > 1 * 1024 * 1024) {
+    //         return cb(new Error('File size exceeds 1MB limit'));
+    //     }
+    //     cb(null, true);
+    // }
 });
 
 // 1. CREATE POST
